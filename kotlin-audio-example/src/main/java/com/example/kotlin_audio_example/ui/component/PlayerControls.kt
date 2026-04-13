@@ -35,54 +35,22 @@ fun PlayerControls(
         horizontalArrangement = Arrangement.Center,
         modifier = modifier
     ) {
-        IconButton(
-            onClick = onPrevious,
-            modifier = Modifier
-                .height(48.dp)
-                .width(48.dp)
-        ) {
-            Icon(
-                Icons.Rounded.FastRewind,
-                contentDescription = "Previous",
-                modifier = Modifier
-                    .height(48.dp)
-                    .width(48.dp)
-            )
+        IconButton(onClick = onPrevious, modifier = Modifier.height(48.dp).width(48.dp)) {
+            Icon(Icons.Rounded.FastRewind, contentDescription = "Previous",
+                modifier = Modifier.height(48.dp).width(48.dp))
         }
         Spacer(modifier = Modifier.width(20.dp))
-        IconButton(
-            onClick = onPlayPause,
-            modifier = Modifier
-                .height(68.dp)
-                .width(68.dp)
-        ) {
+        IconButton(onClick = onPlayPause, modifier = Modifier.height(68.dp).width(68.dp)) {
             Icon(
-                if (isPaused) {
-                    Icons.Rounded.PlayCircle
-                } else {
-                    Icons.Rounded.PauseCircle
-                },
+                if (isPaused) Icons.Rounded.PlayCircle else Icons.Rounded.PauseCircle,
                 contentDescription = "Play",
-                modifier = Modifier
-                    .height(68.dp)
-                    .width(68.dp)
-                    .clip(RoundedCornerShape(50))
+                modifier = Modifier.height(68.dp).width(68.dp).clip(RoundedCornerShape(50))
             )
         }
         Spacer(modifier = Modifier.width(20.dp))
-        IconButton(
-            onClick = onNext,
-            modifier = Modifier
-                .height(48.dp)
-                .width(48.dp)
-        ) {
-            Icon(
-                Icons.Rounded.FastForward,
-                contentDescription = "Next",
-                modifier = Modifier
-                    .height(48.dp)
-                    .width(48.dp)
-            )
+        IconButton(onClick = onNext, modifier = Modifier.height(48.dp).width(48.dp)) {
+            Icon(Icons.Rounded.FastForward, contentDescription = "Next",
+                modifier = Modifier.height(48.dp).width(48.dp))
         }
     }
 }

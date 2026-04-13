@@ -183,7 +183,7 @@ object WebDavSync {
     suspend fun sync(
         settings: AppSettings,
         localDir: File,
-        onProgress: (SyncState) -> Unit
+        onProgress: suspend (SyncState) -> Unit
     ) = withContext(Dispatchers.IO) {
         val listResult = listAudioFiles(
             serverUrl = settings.serverUrl,
@@ -193,20 +193,20 @@ object WebDavSync {
         )
 
         if (listResult.isFailure) {
-            onProgress(SyncState.Error("Nu s-a putut conecta: ${listResult.exceptionOrNull()?.message}"))
+            withContext(Dispatchers.Main) {
+                onProgress(SyncState.Error("Nu s-a putut conecta: ${listResult.exceptionOrNull()?.message}"))
+            }
             return@withContext
         }
 
         val remoteFiles = listResult.getOrThrow()
         if (remoteFiles.isEmpty()) {
-            onProgress(SyncState.Done(downloaded = 0, skipped = 0))
+            withContext(Dispatchers.Main) { onProgress(SyncState.Done(downloaded = 0, skipped = 0)) }
             return@withContext
         }
 
         if (!localDir.exists()) localDir.mkdirs()
 
-        // Prefixul WebDAV al folderului remote (URL-encoded), ex:
-        // /remote.php/dav/files/becash/BecashShare/Music/
         val davPrefix = "/remote.php/dav/files/${settings.username}/" +
                 "${settings.remoteFolderPath.trimStart('/')}/"
         val serverBase = extractBaseUrl(settings.serverUrl)
@@ -215,24 +215,24 @@ object WebDavSync {
         var skipped = 0
 
         remoteFiles.forEachIndexed { index, fileUrl ->
-            // Extrage calea relativă față de folderul remote, cu URL-decoding
-            val encodedPath = fileUrl.removePrefix(serverBase)   // /remote.php/dav/.../883/song.mp3
-            val encodedRelative = encodedPath.removePrefix(davPrefix)  // 883/song.mp3 (encoded)
+            val encodedPath = fileUrl.removePrefix(serverBase)
+            val encodedRelative = encodedPath.removePrefix(davPrefix)
             val relativePath = try {
                 URLDecoder.decode(encodedRelative, "UTF-8")
             } catch (_: Exception) {
                 encodedRelative
             }
             val localFile = File(localDir, relativePath)
-            val displayName = localFile.name
 
-            onProgress(
-                SyncState.Syncing(
-                    current = index + 1,
-                    total = remoteFiles.size,
-                    currentFile = relativePath
+            withContext(Dispatchers.Main) {
+                onProgress(
+                    SyncState.Syncing(
+                        current = index + 1,
+                        total = remoteFiles.size,
+                        currentFile = relativePath
+                    )
                 )
-            )
+            }
 
             if (localFile.exists()) {
                 Timber.d("Sărit (există deja): $relativePath")
@@ -243,7 +243,7 @@ object WebDavSync {
             }
         }
 
-        onProgress(SyncState.Done(downloaded = downloaded, skipped = skipped))
+        withContext(Dispatchers.Main) { onProgress(SyncState.Done(downloaded = downloaded, skipped = skipped)) }
     }
 
     // -------------------------------------------------------------------------

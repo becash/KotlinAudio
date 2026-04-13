@@ -14,8 +14,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.WindowCompat
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,6 +25,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -71,12 +76,27 @@ import timber.log.Timber
 import java.io.File
 import java.util.concurrent.TimeUnit
 
+enum class PlaylistMode {
+    SHUFFLE, NORMAL, PLAY_ONE;
+    fun next() = when (this) {
+        SHUFFLE  -> NORMAL
+        NORMAL   -> PLAY_ONE
+        PLAY_ONE -> SHUFFLE
+    }
+    val label get() = when (this) {
+        SHUFFLE  -> "Shuffle"
+        NORMAL   -> "Normal"
+        PLAY_ONE -> "Play One"
+    }
+}
+
 class MainActivity : ComponentActivity() {
     private lateinit var player: QueuedAudioPlayer
     private lateinit var appSettings: AppSettings
 
     private var currentScreen by mutableStateOf<Screen>(Screen.Main)
     private var syncState by mutableStateOf<SyncState>(SyncState.Idle)
+    private var playlistMode by mutableStateOf(PlaylistMode.SHUFFLE)
 
     // -------------------------------------------------------------------------
     // Permissions
@@ -113,6 +133,13 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         appSettings = AppSettings(this)
+
+        // Restaurează modul playlist salvat
+        playlistMode = try {
+            PlaylistMode.valueOf(appSettings.lastPlaylistMode)
+        } catch (_: Exception) {
+            PlaylistMode.SHUFFLE
+        }
 
         // Player inițializat pe main thread — obligatoriu pentru ExoPlayer
         player = QueuedAudioPlayer(
@@ -208,6 +235,28 @@ class MainActivity : ComponentActivity() {
 
                 SyncStatusBar(syncState = syncState)
 
+                // Bara de acțiuni — butoane suplimentare vor fi adăugate aici
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.Start,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { applyPlaylistMode(playlistMode.next()) }) {
+                        val icon = when (playlistMode) {
+                            PlaylistMode.SHUFFLE  -> Icons.Rounded.Shuffle
+                            PlaylistMode.NORMAL   -> Icons.Rounded.Repeat
+                            PlaylistMode.PLAY_ONE -> Icons.Rounded.RepeatOne
+                        }
+                        val tint = when (playlistMode) {
+                            PlaylistMode.NORMAL -> MaterialTheme.colorScheme.onSurface
+                            else               -> MaterialTheme.colorScheme.primary
+                        }
+                        Icon(icon, contentDescription = playlistMode.label, tint = tint)
+                    }
+                }
+
                 TrackDisplay(
                     title = title, artist = artist, artwork = artwork,
                     position = position, duration = duration, isLive = isLive,
@@ -254,8 +303,28 @@ class MainActivity : ComponentActivity() {
     }
 
     // -------------------------------------------------------------------------
+    // Lifecycle — salvare stare
+    // -------------------------------------------------------------------------
+    override fun onStop() {
+        super.onStop()
+        appSettings.lastTrackIndex    = player.currentIndex
+        appSettings.lastTrackPosition = player.position
+        appSettings.lastPlaylistMode  = playlistMode.name
+    }
+
+    // -------------------------------------------------------------------------
     // Player helpers
     // -------------------------------------------------------------------------
+    private fun applyPlaylistMode(mode: PlaylistMode) {
+        appSettings.lastPlaylistMode = mode.name
+        playlistMode = mode
+        when (mode) {
+            PlaylistMode.SHUFFLE  -> { player.playerOptions.repeatMode = RepeatMode.ALL;  reloadPlayer() }
+            PlaylistMode.NORMAL   -> { player.playerOptions.repeatMode = RepeatMode.ALL;  reloadPlayer() }
+            PlaylistMode.PLAY_ONE -> { player.playerOptions.repeatMode = RepeatMode.ONE }
+        }
+    }
+
     private fun loadAndPlay() {
         lifecycleScope.launch {
             val items = withContext(Dispatchers.IO) { buildLocalAudioItems() }
@@ -268,6 +337,12 @@ class MainActivity : ComponentActivity() {
                 return@launch
             }
             player.add(items)
+            val savedIndex = appSettings.lastTrackIndex.coerceIn(0, items.lastIndex)
+            val savedPosition = appSettings.lastTrackPosition
+            if (savedIndex > 0 || savedPosition > 0L) {
+                player.jumpToItem(savedIndex)
+                player.seek(savedPosition, TimeUnit.MILLISECONDS)
+            }
             player.play()
         }
     }
@@ -287,19 +362,21 @@ class MainActivity : ComponentActivity() {
     private fun buildLocalAudioItems(): List<DefaultAudioItem> {
         val audioDir = File(Environment.getExternalStorageDirectory(), appSettings.localFolderName)
         if (!audioDir.exists() || !audioDir.isDirectory) return emptyList()
-        return audioDir.walkTopDown()
+        val files = audioDir.walkTopDown()
             .filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS }
-            .sortedWith(compareBy({ it.parent }, { it.name }))
-            .map { file ->
-                val folderName = if (file.parentFile == audioDir) "" else file.parentFile?.name ?: ""
-                DefaultAudioItem(
-                    audioUrl = "file://${file.absolutePath}",
-                    type = MediaType.DEFAULT,
-                    title = file.nameWithoutExtension,
-                    artist = folderName,
-                )
+            .let { seq ->
+                if (playlistMode == PlaylistMode.SHUFFLE) seq.toList().shuffled()
+                else seq.sortedWith(compareBy({ it.parent }, { it.name })).toList()
             }
-            .toList()
+        return files.map { file ->
+            val folderName = if (file.parentFile == audioDir) "" else file.parentFile?.name ?: ""
+            DefaultAudioItem(
+                audioUrl = "file://${file.absolutePath}",
+                type = MediaType.DEFAULT,
+                title = file.nameWithoutExtension,
+                artist = folderName,
+            )
+        }
     }
 
     private fun handleExternalAction(action: MediaSessionCallback) {
