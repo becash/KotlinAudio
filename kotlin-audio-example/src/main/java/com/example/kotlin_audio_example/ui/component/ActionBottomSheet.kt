@@ -4,7 +4,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -17,7 +19,8 @@ import androidx.compose.ui.unit.dp
 @ExperimentalMaterial3Api
 fun ActionBottomSheet(
     onDismiss: () -> Unit,
-    onRandomMetadata: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onStartSync: () -> Unit,
 ) {
     val modalBottomSheetState = rememberModalBottomSheetState()
 
@@ -26,20 +29,43 @@ fun ActionBottomSheet(
         sheetState = modalBottomSheetState,
         dragHandle = { BottomSheetDefaults.DragHandle() },
     ) {
-        InnerSheet(onRandomMetadata = onRandomMetadata)
+        InnerSheet(
+            onOpenSettings = {
+                onDismiss()
+                onOpenSettings()
+            },
+            onStartSync = {
+                onDismiss()
+                onStartSync()
+            }
+        )
     }
 }
 
 @Composable
-fun InnerSheet(onRandomMetadata: () -> Unit = {}) {
-    // Add a button to perform an action when clicked
+fun InnerSheet(
+    onOpenSettings: () -> Unit = {},
+    onStartSync: () -> Unit = {},
+) {
     Button(
-        onClick = onRandomMetadata,
+        onClick = onOpenSettings,
         modifier = Modifier
-            .padding(16.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
             .fillMaxWidth()
     ) {
-        Text("Metadata: Update Randomly")
+        Text("Setări Nextcloud")
+    }
+
+    Button(
+        onClick = onStartSync,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.secondary
+        ),
+        modifier = Modifier
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .fillMaxWidth()
+    ) {
+        Text("Sincronizează din Nextcloud")
     }
 }
 
