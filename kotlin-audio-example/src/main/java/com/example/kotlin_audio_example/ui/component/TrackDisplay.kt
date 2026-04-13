@@ -1,6 +1,5 @@
 package com.example.kotlin_audio_example.ui.component
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,11 +12,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.example.kotlin_audio_example.R
 import com.example.kotlin_audio_example.ext.millisecondsToString
 import com.example.kotlin_audio_example.ui.theme.KotlinAudioTheme
 
@@ -33,15 +30,7 @@ fun TrackDisplay(
     onSeek: (Long) -> Unit = {},
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
-        if (artwork.isEmpty())
-            Image(
-                painter = painterResource(id = R.drawable.ic_launcher_background),
-                contentDescription = "Album Cover",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp)
-            )
-        else
+        if (artwork.isNotEmpty())
             AsyncImage(
                 model = artwork,
                 contentDescription = "Album Cover",
@@ -50,14 +39,18 @@ fun TrackDisplay(
                     .height(240.dp)
                     .padding(top = 48.dp)
             )
+        if (artist.isNotEmpty()) {
+            Text(
+                text = artist,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 16.dp)
+            )
+        }
         Text(
             text = title,
             style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(top = 16.dp)
-        )
-        Text(
-            text = artist,
-            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(top = 4.dp)
         )
         if (isLive)
             Text(
