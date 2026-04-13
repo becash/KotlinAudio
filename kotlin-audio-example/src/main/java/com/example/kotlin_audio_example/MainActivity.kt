@@ -182,7 +182,7 @@ class MainActivity : ComponentActivity() {
                 TopAppBar(
                     title = {
                         Text(
-                            text = "Kotlin Audio",
+                            text = "BecashPlayer",
                             color = MaterialTheme.colorScheme.onPrimary
                         )
                     },
@@ -494,7 +494,7 @@ fun MainScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Kotlin Audio",
+                        text = "BecashPlayer",
                         color = MaterialTheme.colorScheme.onPrimary
                     )
                 },
