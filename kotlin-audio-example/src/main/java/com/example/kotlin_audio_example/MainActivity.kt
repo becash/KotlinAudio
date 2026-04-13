@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -218,14 +219,7 @@ class MainActivity : ComponentActivity() {
         var duration by remember { mutableStateOf(0L) }
         var isLive by remember { mutableStateOf(false) }
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                TopAppBar(
-                    title = { Text("BecashPlayer", color = MaterialTheme.colorScheme.onPrimary) },
-                    colors = TopAppBarDefaults.smallTopAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
-                )
-
+            Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
                 SyncStatusBar(syncState = syncState)
 
                 // Bara de acțiuni — butoane suplimentare vor fi adăugate aici
@@ -556,11 +550,25 @@ fun PlaylistView(
     onItemClick: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Sortare alfabetică după folder + titlu, cu păstrarea indexului original din player
+    val sorted = remember(items) {
+        items.mapIndexed { index, item -> index to item }
+            .sortedWith(compareBy(
+                { it.second.artist ?: "" },
+                { it.second.title ?: "" }
+            ))
+    }
+
+    // Poziția cântecului curent în lista sortată
+    val sortedCurrentPos = remember(sorted, currentIndex) {
+        sorted.indexOfFirst { it.first == currentIndex }.coerceAtLeast(0)
+    }
+
     val listState = rememberLazyListState()
 
-    LaunchedEffect(currentIndex) {
-        if (items.isNotEmpty()) {
-            listState.animateScrollToItem(currentIndex)
+    LaunchedEffect(sortedCurrentPos) {
+        if (sorted.isNotEmpty()) {
+            listState.animateScrollToItem(sortedCurrentPos)
         }
     }
 
@@ -568,8 +576,8 @@ fun PlaylistView(
         state = listState,
         modifier = modifier.fillMaxWidth()
     ) {
-        itemsIndexed(items) { index, item ->
-            val isPlaying = index == currentIndex
+        itemsIndexed(sorted) { _, (playerIndex, item) ->
+            val isPlaying = playerIndex == currentIndex
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -577,7 +585,7 @@ fun PlaylistView(
                         if (isPlaying) MaterialTheme.colorScheme.primaryContainer
                         else MaterialTheme.colorScheme.surface
                     )
-                    .clickable { onItemClick(index) }
+                    .clickable { onItemClick(playerIndex) }
                     .padding(horizontal = 16.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
