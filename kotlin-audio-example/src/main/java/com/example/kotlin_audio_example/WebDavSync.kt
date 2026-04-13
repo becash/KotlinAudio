@@ -246,6 +246,34 @@ object WebDavSync {
         withContext(Dispatchers.Main) { onProgress(SyncState.Done(downloaded = downloaded, skipped = skipped)) }
     }
 
+    /**
+     * Șterge un fișier de pe serverul WebDAV.
+     * remotePath ex: /BecashShare/Music/883/song.mp3
+     */
+    suspend fun deleteFile(
+        serverUrl: String,
+        username: String,
+        password: String,
+        remotePath: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val url = buildWebDavUrl(serverUrl, username, remotePath)
+            val request = Request.Builder()
+                .url(url)
+                .delete()
+                .header("Authorization", basicAuthHeader(username, password))
+                .build()
+            val response = httpClient.newCall(request).execute()
+            val ok = response.code in 200..299 || response.code == 404
+            response.close()
+            Timber.d("DELETE $url → ${response.code}")
+            ok
+        } catch (e: Exception) {
+            Timber.e(e, "Eroare la ștergerea WebDAV")
+            false
+        }
+    }
+
     // -------------------------------------------------------------------------
     // XML parsing pentru răspunsul PROPFIND
     // -------------------------------------------------------------------------

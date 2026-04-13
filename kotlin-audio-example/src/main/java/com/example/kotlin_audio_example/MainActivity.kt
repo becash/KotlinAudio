@@ -24,10 +24,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,7 +62,6 @@ import com.doublesymmetry.kotlinaudio.models.NotificationConfig
 import com.doublesymmetry.kotlinaudio.models.PlayerConfig
 import com.doublesymmetry.kotlinaudio.models.RepeatMode
 import com.doublesymmetry.kotlinaudio.players.QueuedAudioPlayer
-import com.example.kotlin_audio_example.ui.component.ActionBottomSheet
 import com.example.kotlin_audio_example.ui.component.PlayerControls
 import com.example.kotlin_audio_example.ui.component.TrackDisplay
 import com.example.kotlin_audio_example.ui.screen.SettingsScreen
@@ -208,26 +208,10 @@ class MainActivity : ComponentActivity() {
         var position by remember { mutableStateOf(0L) }
         var duration by remember { mutableStateOf(0L) }
         var isLive by remember { mutableStateOf(false) }
-        var showSheet by remember { mutableStateOf(false) }
-
-        if (showSheet) {
-            ActionBottomSheet(
-                onDismiss = { showSheet = false },
-                onOpenSettings = { currentScreen = Screen.Settings },
-                onStartSync = { startSync() }
-            )
-        }
-
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(modifier = Modifier.fillMaxSize()) {
                 TopAppBar(
                     title = { Text("BecashPlayer", color = MaterialTheme.colorScheme.onPrimary) },
-                    actions = {
-                        IconButton(onClick = { showSheet = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "Meniu",
-                                tint = MaterialTheme.colorScheme.onPrimary)
-                        }
-                    },
                     colors = TopAppBarDefaults.smallTopAppBarColors(
                         containerColor = MaterialTheme.colorScheme.primary
                     )
@@ -243,6 +227,7 @@ class MainActivity : ComponentActivity() {
                     horizontalArrangement = Arrangement.Start,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Mod playlist
                     IconButton(onClick = { applyPlaylistMode(playlistMode.next()) }) {
                         val icon = when (playlistMode) {
                             PlaylistMode.SHUFFLE  -> Icons.Rounded.Shuffle
@@ -254,6 +239,26 @@ class MainActivity : ComponentActivity() {
                             else               -> MaterialTheme.colorScheme.primary
                         }
                         Icon(icon, contentDescription = playlistMode.label, tint = tint)
+                    }
+                    // Sincronizare Nextcloud
+                    IconButton(onClick = { startSync() }) {
+                        Icon(
+                            Icons.Rounded.Sync,
+                            contentDescription = "Sincronizează Nextcloud",
+                            tint = if (syncState is SyncState.Syncing)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                    // Șterge cântecul curent (local + Nextcloud) și trece la următor
+                    IconButton(onClick = { deleteCurrentTrack() }) {
+                        Icon(
+                            Icons.Rounded.DeleteForever,
+                            contentDescription = "Șterge cântecul curent",
+                            tint = MaterialTheme.colorScheme.error
+                        )
                     }
                 }
 
@@ -307,14 +312,36 @@ class MainActivity : ComponentActivity() {
     // -------------------------------------------------------------------------
     override fun onStop() {
         super.onStop()
-        appSettings.lastTrackIndex    = player.currentIndex
-        appSettings.lastTrackPosition = player.position
-        appSettings.lastPlaylistMode  = playlistMode.name
+        appSettings.lastTrackIndex   = player.currentIndex
+        appSettings.lastPlaylistMode = playlistMode.name
     }
 
     // -------------------------------------------------------------------------
     // Player helpers
     // -------------------------------------------------------------------------
+    private fun deleteCurrentTrack() {
+        val audioUrl = player.currentItem?.audioUrl ?: return
+        val localPath = audioUrl.removePrefix("file://")
+        val localFile = File(localPath)
+        val audioRootDir = File(Environment.getExternalStorageDirectory(), appSettings.localFolderName)
+        val relativePath = localFile.toRelativeString(audioRootDir)  // ex: 883/song.mp3
+        val remoteFilePath = "${appSettings.remoteFolderPath.trimEnd('/')}/$relativePath"
+
+        // Trece la cântecul următor înainte de ștergere
+        player.next()
+
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { localFile.delete() }
+            WebDavSync.deleteFile(
+                serverUrl = appSettings.serverUrl,
+                username = appSettings.username,
+                password = appSettings.password,
+                remotePath = remoteFilePath
+            )
+            Toast.makeText(this@MainActivity, "\"${localFile.nameWithoutExtension}\" șters.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun applyPlaylistMode(mode: PlaylistMode) {
         appSettings.lastPlaylistMode = mode.name
         playlistMode = mode
@@ -338,10 +365,8 @@ class MainActivity : ComponentActivity() {
             }
             player.add(items)
             val savedIndex = appSettings.lastTrackIndex.coerceIn(0, items.lastIndex)
-            val savedPosition = appSettings.lastTrackPosition
-            if (savedIndex > 0 || savedPosition > 0L) {
+            if (savedIndex > 0) {
                 player.jumpToItem(savedIndex)
-                player.seek(savedPosition, TimeUnit.MILLISECONDS)
             }
             player.play()
         }
@@ -510,19 +535,12 @@ fun MainScreen(
     title: String, artist: String, artwork: String,
     position: Long, duration: Long, isLive: Boolean,
     onPrevious: () -> Unit = {}, onNext: () -> Unit = {},
-    isPaused: Boolean, onTopBarAction: () -> Unit = {},
-    onPlayPause: () -> Unit = {}, onSeek: (Long) -> Unit = {},
+    isPaused: Boolean, onPlayPause: () -> Unit = {}, onSeek: (Long) -> Unit = {},
 ) {
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(modifier = Modifier.fillMaxSize()) {
             TopAppBar(
                 title = { Text("BecashPlayer", color = MaterialTheme.colorScheme.onPrimary) },
-                actions = {
-                    IconButton(onClick = onTopBarAction) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Meniu",
-                            tint = MaterialTheme.colorScheme.onPrimary)
-                    }
-                },
                 colors = TopAppBarDefaults.smallTopAppBarColors(containerColor = MaterialTheme.colorScheme.primary)
             )
             TrackDisplay(
