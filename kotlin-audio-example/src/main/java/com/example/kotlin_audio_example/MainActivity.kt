@@ -14,6 +14,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.WindowCompat
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,8 +23,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Repeat
@@ -53,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import android.view.WindowManager
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.doublesymmetry.kotlinaudio.models.AudioItem
 import com.doublesymmetry.kotlinaudio.models.AudioPlayerState
 import com.doublesymmetry.kotlinaudio.models.DefaultAudioItem
 import com.doublesymmetry.kotlinaudio.models.MediaSessionCallback
@@ -97,6 +104,8 @@ class MainActivity : ComponentActivity() {
     private var currentScreen by mutableStateOf<Screen>(Screen.Main)
     private var syncState by mutableStateOf<SyncState>(SyncState.Idle)
     private var playlistMode by mutableStateOf(PlaylistMode.SHUFFLE)
+    private var playlistItems by mutableStateOf<List<com.doublesymmetry.kotlinaudio.models.AudioItem>>(emptyList())
+    private var currentTrackIndex by mutableStateOf(0)
 
     // -------------------------------------------------------------------------
     // Permissions
@@ -262,13 +271,20 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // Playlist — se întinde ocupând tot spațiul disponibil
+                PlaylistView(
+                    items = playlistItems,
+                    currentIndex = currentTrackIndex,
+                    onItemClick = { index -> player.jumpToItem(index) },
+                    modifier = Modifier.weight(1f)
+                )
+
                 TrackDisplay(
                     title = title, artist = artist, artwork = artwork,
                     position = position, duration = duration, isLive = isLive,
                     onSeek = { player.seek(it, TimeUnit.MILLISECONDS) },
                     modifier = Modifier.padding(top = 16.dp)
                 )
-                Spacer(modifier = Modifier.weight(1f))
                 PlayerControls(
                     onPrevious = { player.previous() },
                     onNext = { player.next() },
@@ -293,6 +309,8 @@ class MainActivity : ComponentActivity() {
                 artwork = player.currentItem?.artwork ?: ""
                 duration = player.currentItem?.duration ?: 0L
                 isLive = player.isCurrentMediaItemLive
+                currentTrackIndex = player.currentIndex
+                playlistItems = player.items
             }
         }
 
@@ -365,10 +383,10 @@ class MainActivity : ComponentActivity() {
             }
             player.add(items)
             val savedIndex = appSettings.lastTrackIndex.coerceIn(0, items.lastIndex)
-            if (savedIndex > 0) {
-                player.jumpToItem(savedIndex)
-            }
+            if (savedIndex > 0) player.jumpToItem(savedIndex)
             player.play()
+            playlistItems = player.items
+            currentTrackIndex = player.currentIndex
         }
     }
 
@@ -380,6 +398,8 @@ class MainActivity : ComponentActivity() {
             player.removeUpcomingItems()
             player.add(items)
             player.play()
+            playlistItems = player.items
+            currentTrackIndex = 0
         }
     }
 
@@ -523,6 +543,64 @@ fun SyncStatusBar(syncState: SyncState) {
             }
         }
         else -> {}
+    }
+}
+
+// -------------------------------------------------------------------------
+// Playlist
+// -------------------------------------------------------------------------
+@Composable
+fun PlaylistView(
+    items: List<AudioItem>,
+    currentIndex: Int,
+    onItemClick: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(currentIndex) {
+        if (items.isNotEmpty()) {
+            listState.animateScrollToItem(currentIndex)
+        }
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = modifier.fillMaxWidth()
+    ) {
+        itemsIndexed(items) { index, item ->
+            val isPlaying = index == currentIndex
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (isPlaying) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surface
+                    )
+                    .clickable { onItemClick(index) }
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    if (!item.artist.isNullOrEmpty()) {
+                        Text(
+                            text = item.artist!!,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isPlaying) MaterialTheme.colorScheme.onPrimaryContainer
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                    Text(
+                        text = item.title ?: "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (isPlaying) MaterialTheme.colorScheme.onPrimaryContainer
+                                else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
     }
 }
 
