@@ -26,6 +26,7 @@ fun TrackDisplay(
     position: Long,
     duration: Long,
     isLive: Boolean,
+    trackLabel: String = "",
     modifier: Modifier = Modifier,
     onSeek: (Long) -> Unit = {},
 ) {
@@ -47,11 +48,22 @@ fun TrackDisplay(
                 modifier = Modifier.padding(top = 16.dp)
             )
         }
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleLarge,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(top = 4.dp)
-        )
+        ) {
+            if (trackLabel.isNotEmpty()) {
+                Text(
+                    text = "$trackLabel  ",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+            )
+        }
         if (isLive)
             Text(
                 text = "Live",

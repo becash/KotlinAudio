@@ -46,6 +46,7 @@ fun SettingsScreen(
     var password by remember { mutableStateOf(settings.password) }
     var remoteFolderPath by remember { mutableStateOf(settings.remoteFolderPath) }
     var localFolderName by remember { mutableStateOf(settings.localFolderName) }
+    var mongoUrl by remember { mutableStateOf(settings.mongoUrl) }
     var passwordVisible by remember { mutableStateOf(false) }
     var savedMessage by remember { mutableStateOf(false) }
 
@@ -161,6 +162,25 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Text(
+                    text = "MongoDB",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                OutlinedTextField(
+                    value = mongoUrl,
+                    onValueChange = { mongoUrl = it },
+                    label = { Text("MongoDB URL") },
+                    placeholder = { Text("mongodb://root:parola@server:27017") },
+                    supportingText = { Text("Connection string pentru baza de date") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
@@ -172,6 +192,7 @@ fun SettingsScreen(
                             if (it.startsWith('/')) it else "/$it"
                         }
                         settings.localFolderName = localFolderName.trim().ifEmpty { "Audio" }
+                        settings.mongoUrl = mongoUrl.trim()
                         savedMessage = true
                     },
                     modifier = Modifier.fillMaxWidth()

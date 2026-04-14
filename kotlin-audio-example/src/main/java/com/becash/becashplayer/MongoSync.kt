@@ -10,16 +10,14 @@ import timber.log.Timber
 
 object MongoSync {
 
-    // Prefixul cu care MongoDB stochează _id față de calea relativă locală
-    // ex: MongoDB _id = "/Muzoane/Russian/883/song.mp3"
-    //     cheie locală  = "883/song.mp3"
-    const val MONGO_PREFIX = "/Muzoane/Russian/"
-
     /**
      * Descarcă colecția `played` din MongoDB și returnează un map
-     * cheie relativă locală → tot documentul MongoDB (fără _id).
+     * _id MongoDB → tot documentul MongoDB (fără _id).
      *
-     * [localFiles] = set de căi relative locale (ex: {"883/song.mp3", ...})
+     * _id din MongoDB este identic cu _id din playlist.json —
+     * comparăm direct, fără nicio transformare.
+     *
+     * [localFiles] = set de _id din playlist.json
      */
     suspend fun sync(mongoUrl: String, localFiles: Set<String>): Map<String, JSONObject> =
         withContext(Dispatchers.IO) {
@@ -33,9 +31,8 @@ object MongoSync {
 
                 collection.find(Filters.ne("delete", 1)).collect { doc ->
                     val mongoId = doc.getString("_id") ?: return@collect
-                    val relKey = mongoId.removePrefix(MONGO_PREFIX)
-                    if (relKey in localFiles) {
-                        result[relKey] = docToJson(doc)
+                    if (mongoId in localFiles) {
+                        result[mongoId] = docToJson(doc)
                     }
                 }
 

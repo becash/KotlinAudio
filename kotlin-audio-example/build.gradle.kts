@@ -32,6 +32,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
         jvmTarget = "1.8"
@@ -45,6 +46,10 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/INDEX.LIST"
+            excludes += "META-INF/io.netty.versions.properties"
+            excludes += "META-INF/MANIFEST.MF"
+            excludes += "META-INF/native-image/**"
         }
     }
 }
@@ -61,6 +66,10 @@ dependencies {
 
     implementation(project(":kotlin-audio"))
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.mongodb:mongodb-driver-kotlin-coroutine:4.11.0") {
+        exclude(group = "org.mongodb", module = "bson-record-codec")
+    }
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     implementation("io.sentry:sentry-android:7.19.1")
     implementation("androidx.core:core-ktx:1.10.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.1")

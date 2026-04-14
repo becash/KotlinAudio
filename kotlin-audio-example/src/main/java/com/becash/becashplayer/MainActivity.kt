@@ -83,6 +83,8 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.becash.becashplayer.ext.millisecondsToString
+import org.json.JSONObject
 import timber.log.Timber
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -112,6 +114,8 @@ class MainActivity : ComponentActivity() {
     private var currentTrackIndex by mutableStateOf(0)
     private var filterQuery by mutableStateOf("")
     private var filterInverted by mutableStateOf(false)
+    private var songInfoMap by mutableStateOf<Map<String, JSONObject>>(emptyMap())
+    private var isMongoBusy by mutableStateOf(false)
 
     /**
      * Lista de indecși din player (în ordine sortată) care trec filtrul curent.
@@ -119,13 +123,15 @@ class MainActivity : ComponentActivity() {
      */
     private val filteredIndices: List<Int>
         get() {
-            val sorted = playlistItems
-                .mapIndexed { i, item -> i to item }
-                .sortedWith(compareBy({ it.second.artist ?: "" }, { it.second.title ?: "" }))
-            return if (filterQuery.isBlank()) sorted.map { it.first }
+            // În modul shuffle coada e deja amestecată — păstrăm ordinea ei naturală
+            // În modul normal sortăm alfabetic
+            val indexed = playlistItems.mapIndexed { i, item -> i to item }
+            val ordered = if (playlistMode == PlaylistMode.SHUFFLE) indexed
+                          else indexed.sortedWith(compareBy({ it.second.artist ?: "" }, { it.second.title ?: "" }))
+            return if (filterQuery.isBlank()) ordered.map { it.first }
             else {
                 val q = filterQuery.trim().lowercase()
-                sorted.filter { (_, item) ->
+                ordered.filter { (_, item) ->
                     val matches = (item.title ?: "").lowercase().contains(q) ||
                                   (item.artist ?: "").lowercase().contains(q)
                     if (filterInverted) !matches else matches
@@ -193,6 +199,8 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {
             PlaylistMode.SHUFFLE
         }
+        filterQuery    = appSettings.filterQuery
+        filterInverted = appSettings.filterInverted
 
         // Player inițializat pe main thread — obligatoriu pentru ExoPlayer
         player = QueuedAudioPlayer(
@@ -210,6 +218,9 @@ class MainActivity : ComponentActivity() {
             val dir = File(Environment.getExternalStorageDirectory(), appSettings.localFolderName)
             if (!dir.exists()) dir.mkdirs()
         }
+
+        // Încarcă cache-ul MongoDB local
+        songInfoMap = SongInfoStore.load(this)
 
         if (hasStoragePermission()) {
             loadAndPlay()
@@ -260,6 +271,16 @@ class MainActivity : ComponentActivity() {
             }
             onDispose {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
+
+        // Map audioUrl → JSONObject (document MongoDB) pentru a afișa durata în playlist
+        val audioBaseDir = remember {
+            File(Environment.getExternalStorageDirectory(), appSettings.localFolderName).absolutePath
+        }
+        val songInfoByUrl = remember(songInfoMap) {
+            songInfoMap.entries.associate { (mongoId, doc) ->
+                "file://$audioBaseDir/${mongoId.trimStart('/')}" to doc
             }
         }
 
@@ -317,14 +338,36 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // Playlist — se întinde ocupând tot spațiul disponibil
+                // Calculăm poziția exactă ca în PlaylistView: sortare alfabetică + filtru
+                val sortedForLabel = remember(playlistItems) {
+                    playlistItems.mapIndexed { i, item -> i to item }
+                        .sortedWith(compareBy({ it.second.artist ?: "" }, { it.second.title ?: "" }))
+                }
+                val filteredForLabel = remember(sortedForLabel, filterQuery, filterInverted) {
+                    if (filterQuery.isBlank()) sortedForLabel
+                    else {
+                        val q = filterQuery.trim().lowercase()
+                        sortedForLabel.filter { (_, item) ->
+                            val matches = (item.title ?: "").lowercase().contains(q) ||
+                                          (item.artist ?: "").lowercase().contains(q)
+                            if (filterInverted) !matches else matches
+                        }
+                    }
+                }
+                val trackPos = filteredForLabel.indexOfFirst { it.first == currentTrackIndex }
+                    .takeIf { it >= 0 }?.plus(1)
+                val trackLabel = if (trackPos != null) "$trackPos / ${filteredForLabel.size}" else ""
+
                 PlaylistView(
                     items = playlistItems,
                     currentIndex = currentTrackIndex,
                     onItemClick = { index -> player.jumpToItem(index); player.play() },
                     filterQuery = filterQuery,
-                    onFilterQueryChange = { filterQuery = it },
+                    onFilterQueryChange = { filterQuery = it; appSettings.filterQuery = it },
                     filterInverted = filterInverted,
-                    onFilterInvertedChange = { filterInverted = it },
+                    onFilterInvertedChange = { filterInverted = it; appSettings.filterInverted = it },
+                    songInfoByUrl = songInfoByUrl,
+                    trackLabel = trackLabel,
                     modifier = Modifier.weight(1f)
                 )
 
@@ -407,7 +450,12 @@ class MainActivity : ComponentActivity() {
         player.next()
 
         lifecycleScope.launch {
-            withContext(Dispatchers.IO) { localFile.delete() }
+            withContext(Dispatchers.IO) {
+                localFile.delete()
+                // Elimină intrarea din playlist.json
+                val updated = PlaylistStore.load(this@MainActivity, audioRootDir.absolutePath).filter { it != localPath }
+                PlaylistStore.save(this@MainActivity, updated, audioRootDir.absolutePath)
+            }
             WebDavSync.deleteFile(
                 serverUrl = appSettings.serverUrl,
                 username = appSettings.username,
@@ -469,13 +517,19 @@ class MainActivity : ComponentActivity() {
     // Rulează pe Dispatchers.IO — apelat mereu din withContext(Dispatchers.IO)
     private fun buildLocalAudioItems(): List<DefaultAudioItem> {
         val audioDir = File(Environment.getExternalStorageDirectory(), appSettings.localFolderName)
-        if (!audioDir.exists() || !audioDir.isDirectory) return emptyList()
-        val files = audioDir.walkTopDown()
-            .filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS && it.length() > 4096 }
-            .let { seq ->
-                if (playlistMode == PlaylistMode.SHUFFLE) seq.toList().shuffled()
-                else seq.sortedWith(compareBy({ it.parent }, { it.name })).toList()
-            }
+
+        // Citim lista din PlaylistStore; dacă e goală (prima rulare), scanăm și salvăm
+        val paths = PlaylistStore.load(this, audioDir.absolutePath).ifEmpty {
+            val scanned = scanAudioFiles(audioDir)
+            if (scanned.isNotEmpty()) PlaylistStore.save(this, scanned, audioDir.absolutePath)
+            scanned
+        }
+
+        val files = if (playlistMode == PlaylistMode.SHUFFLE)
+            paths.map { File(it) }.shuffled()
+        else
+            paths.map { File(it) }.sortedWith(compareBy({ it.parent }, { it.name }))
+
         return files.map { file ->
             val folderName = file.parentFile
                 ?.takeIf { it != audioDir }
@@ -488,6 +542,16 @@ class MainActivity : ComponentActivity() {
                 artist = folderName,
             )
         }
+    }
+
+    // Scanează filesystem-ul și returnează căile absolute — folosit doar la refresh
+    private fun scanAudioFiles(audioDir: File): List<String> {
+        if (!audioDir.exists() || !audioDir.isDirectory) return emptyList()
+        return audioDir.walkTopDown()
+            .filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS && it.length() > 4096 }
+            .sortedWith(compareBy({ it.parent }, { it.name }))
+            .map { it.absolutePath }
+            .toList()
     }
 
     private fun handleExternalAction(action: MediaSessionCallback) {
@@ -547,18 +611,57 @@ class MainActivity : ComponentActivity() {
                 onProgress = { state ->
                     syncState = state
                     if (state is SyncState.Done) {
+                        // Rescrie playlist.json cu lista actualizată din folder
+                        withContext(Dispatchers.IO) {
+                            val paths = scanAudioFiles(localDir)
+                            PlaylistStore.save(this@MainActivity, paths, localDir.absolutePath)
+                        }
                         reloadPlayer()
                         Toast.makeText(
                             this@MainActivity,
                             "Sincronizare completă: ${state.downloaded} descărcate, ${state.skipped} existau deja.",
                             Toast.LENGTH_LONG
                         ).show()
+                        // Imediat după Nextcloud, sincronizăm și datele din MongoDB
+                        startMongoSync()
                     }
                     if (state is SyncState.Error) {
                         Toast.makeText(this@MainActivity, state.message, Toast.LENGTH_LONG).show()
                     }
                 }
             )
+        }
+    }
+
+    private fun startMongoSync() {
+        if (appSettings.mongoUrl.isBlank()) {
+            Toast.makeText(this, "Configurează URL-ul MongoDB în setări.", Toast.LENGTH_LONG).show()
+            currentScreen = Screen.Settings
+            return
+        }
+        isMongoBusy = true
+        lifecycleScope.launch {
+            try {
+                // Cheile relative locale (ex: "883/song.mp3") — fără baseDir
+                val localFiles = withContext(Dispatchers.IO) {
+                    PlaylistStore.load(this@MainActivity).toSet()
+                }
+                val result = MongoSync.sync(appSettings.mongoUrl, localFiles)
+                withContext(Dispatchers.IO) {
+                    SongInfoStore.save(this@MainActivity, result)
+                }
+                songInfoMap = result
+                Toast.makeText(
+                    this@MainActivity,
+                    "MongoDB: ${result.size} cântece sincronizate.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } catch (e: Exception) {
+                Timber.e(e, "MongoSync error")
+                Toast.makeText(this@MainActivity, "Eroare MongoDB: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                isMongoBusy = false
+            }
         }
     }
 
@@ -624,6 +727,8 @@ fun PlaylistView(
     onFilterQueryChange: (String) -> Unit,
     filterInverted: Boolean,
     onFilterInvertedChange: (Boolean) -> Unit,
+    songInfoByUrl: Map<String, JSONObject> = emptyMap(),
+    trackLabel: String = "",
     modifier: Modifier = Modifier,
 ) {
     // Sortare alfabetică după folder + titlu, cu păstrarea indexului original din player
@@ -667,8 +772,12 @@ fun PlaylistView(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth()
         ) {
-            itemsIndexed(filtered) { _, (playerIndex, item) ->
+            itemsIndexed(filtered) { listPos, (playerIndex, item) ->
                 val isPlaying = playerIndex == currentIndex
+                val rowNumber = listPos + 1
+                val itemColor = if (isPlaying) MaterialTheme.colorScheme.onPrimaryContainer
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                val duration = songInfoByUrl[item.audioUrl]?.optLong("duration", 0L)?.takeIf { it > 0 }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -680,13 +789,18 @@ fun PlaylistView(
                         .padding(horizontal = 16.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Text(
+                        text = "$rowNumber",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = itemColor,
+                        modifier = Modifier.padding(end = 10.dp)
+                    )
                     Column(modifier = Modifier.weight(1f)) {
                         if (!item.artist.isNullOrEmpty()) {
                             Text(
                                 text = item.artist!!,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (isPlaying) MaterialTheme.colorScheme.onPrimaryContainer
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = itemColor,
                                 maxLines = 1
                             )
                         }
@@ -696,6 +810,14 @@ fun PlaylistView(
                             color = if (isPlaying) MaterialTheme.colorScheme.onPrimaryContainer
                                     else MaterialTheme.colorScheme.onSurface,
                             maxLines = 1
+                        )
+                    }
+                    if (duration != null) {
+                        Text(
+                            text = duration.millisecondsToString(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = itemColor,
+                            modifier = Modifier.padding(start = 8.dp)
                         )
                     }
                 }
@@ -709,6 +831,14 @@ fun PlaylistView(
                 .padding(horizontal = 8.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (trackLabel.isNotEmpty()) {
+                Text(
+                    text = trackLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp, end = 8.dp)
+                )
+            }
             OutlinedTextField(
                 value = filterQuery,
                 onValueChange = onFilterQueryChange,
