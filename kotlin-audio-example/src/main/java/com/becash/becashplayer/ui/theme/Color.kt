@@ -1,4 +1,4 @@
-package com.example.kotlin_audio_example.ui.theme
+package com.becash.becashplayer.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

@@ -1,4 +1,4 @@
-package com.example.kotlin_audio_example.ui.theme
+package com.becash.becashplayer.ui.theme
 
 import android.app.Activity
 import android.os.Build
@@ -38,7 +38,7 @@ private val LightColorScheme = lightColorScheme(
 )
 
 @Composable
-fun KotlinAudioTheme(
+fun BecashPlayerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     // Dynamic color is available on Android 12+
     dynamicColor: Boolean = true,

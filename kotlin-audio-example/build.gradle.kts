@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.kotlin_audio_example"
+    namespace = "com.becash.becashplayer"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.kotlin_audio_example"
+        applicationId = "com.becash.becashplayer"
         minSdk = 21
         targetSdk = 34
         versionCode = 1

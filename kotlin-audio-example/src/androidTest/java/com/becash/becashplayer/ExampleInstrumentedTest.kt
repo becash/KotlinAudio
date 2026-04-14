@@ -1,4 +1,4 @@
-package com.example.kotlin_audio_example
+package com.becash.becashplayer
 
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -19,6 +19,6 @@ class ExampleInstrumentedTest {
     fun useAppContext() {
         // Context of the app under test.
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("com.example.kotlin_audio_example", appContext.packageName)
+        assertEquals("com.becash.becashplayer", appContext.packageName)
     }
 }

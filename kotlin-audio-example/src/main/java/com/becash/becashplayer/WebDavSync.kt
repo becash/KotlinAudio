@@ -1,4 +1,4 @@
-package com.example.kotlin_audio_example
+package com.becash.becashplayer
 
 import android.util.Base64
 import android.util.Xml

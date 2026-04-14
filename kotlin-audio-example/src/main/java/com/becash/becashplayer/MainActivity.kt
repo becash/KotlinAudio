@@ -1,4 +1,4 @@
-package com.example.kotlin_audio_example
+package com.becash.becashplayer
 
 import android.Manifest
 import android.content.Intent
@@ -32,6 +32,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.FilterListOff
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
@@ -41,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -70,10 +73,10 @@ import com.doublesymmetry.kotlinaudio.models.NotificationConfig
 import com.doublesymmetry.kotlinaudio.models.PlayerConfig
 import com.doublesymmetry.kotlinaudio.models.RepeatMode
 import com.doublesymmetry.kotlinaudio.players.QueuedAudioPlayer
-import com.example.kotlin_audio_example.ui.component.PlayerControls
-import com.example.kotlin_audio_example.ui.component.TrackDisplay
-import com.example.kotlin_audio_example.ui.screen.SettingsScreen
-import com.example.kotlin_audio_example.ui.theme.KotlinAudioTheme
+import com.becash.becashplayer.ui.component.PlayerControls
+import com.becash.becashplayer.ui.component.TrackDisplay
+import com.becash.becashplayer.ui.screen.SettingsScreen
+import com.becash.becashplayer.ui.theme.BecashPlayerTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
@@ -107,6 +110,46 @@ class MainActivity : ComponentActivity() {
     private var playlistMode by mutableStateOf(PlaylistMode.SHUFFLE)
     private var playlistItems by mutableStateOf<List<com.doublesymmetry.kotlinaudio.models.AudioItem>>(emptyList())
     private var currentTrackIndex by mutableStateOf(0)
+    private var filterQuery by mutableStateOf("")
+    private var filterInverted by mutableStateOf(false)
+
+    /**
+     * Lista de indecși din player (în ordine sortată) care trec filtrul curent.
+     * Dacă filtrul e gol, conține toți indicii sortați.
+     */
+    private val filteredIndices: List<Int>
+        get() {
+            val sorted = playlistItems
+                .mapIndexed { i, item -> i to item }
+                .sortedWith(compareBy({ it.second.artist ?: "" }, { it.second.title ?: "" }))
+            return if (filterQuery.isBlank()) sorted.map { it.first }
+            else {
+                val q = filterQuery.trim().lowercase()
+                sorted.filter { (_, item) ->
+                    val matches = (item.title ?: "").lowercase().contains(q) ||
+                                  (item.artist ?: "").lowercase().contains(q)
+                    if (filterInverted) !matches else matches
+                }.map { it.first }
+            }
+        }
+
+    private fun nextFiltered() {
+        val indices = filteredIndices
+        if (indices.isEmpty()) { player.next(); return }
+        val pos = indices.indexOf(currentTrackIndex)
+        val next = if (pos < 0 || pos >= indices.lastIndex) indices.first() else indices[pos + 1]
+        player.jumpToItem(next)
+        player.play()
+    }
+
+    private fun previousFiltered() {
+        val indices = filteredIndices
+        if (indices.isEmpty()) { player.previous(); return }
+        val pos = indices.indexOf(currentTrackIndex)
+        val prev = if (pos <= 0) indices.last() else indices[pos - 1]
+        player.jumpToItem(prev)
+        player.play()
+    }
 
     // -------------------------------------------------------------------------
     // Permissions
@@ -179,8 +222,16 @@ class MainActivity : ComponentActivity() {
             .onEach { handleExternalAction(it) }
             .launchIn(lifecycleScope)
 
+        // Sari automat la piesa următoare dacă fișierul curent este corupt
+        player.event.playbackError
+            .onEach { error ->
+                Timber.e("Eroare redare (${error.code}): ${error.message} — se trece la piesa următoare")
+                player.next()
+            }
+            .launchIn(lifecycleScope)
+
         setContent {
-            KotlinAudioTheme {
+            BecashPlayerTheme {
                 when (currentScreen) {
                     is Screen.Settings -> SettingsScreen(
                         settings = appSettings,
@@ -269,7 +320,11 @@ class MainActivity : ComponentActivity() {
                 PlaylistView(
                     items = playlistItems,
                     currentIndex = currentTrackIndex,
-                    onItemClick = { index -> player.jumpToItem(index) },
+                    onItemClick = { index -> player.jumpToItem(index); player.play() },
+                    filterQuery = filterQuery,
+                    onFilterQueryChange = { filterQuery = it },
+                    filterInverted = filterInverted,
+                    onFilterInvertedChange = { filterInverted = it },
                     modifier = Modifier.weight(1f)
                 )
 
@@ -280,8 +335,8 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.padding(top = 16.dp)
                 )
                 PlayerControls(
-                    onPrevious = { player.previous() },
-                    onNext = { player.next() },
+                    onPrevious = { previousFiltered() },
+                    onNext = { nextFiltered() },
                     isPaused = playerState.value != AudioPlayerState.PLAYING,
                     onPlayPause = {
                         if (player.playerState == AudioPlayerState.PLAYING) player.pause()
@@ -298,12 +353,21 @@ class MainActivity : ComponentActivity() {
         // Track info — actualizat la schimbarea piesei
         LaunchedEffect(Unit) {
             player.event.audioItemTransition.collect {
+                val newIndex = player.currentIndex
+                // Dacă filtrul e activ și piesa nouă nu e în lista filtrată, sari la următoarea filtrată
+                val fi = filteredIndices
+                if (filterQuery.isNotBlank() && fi.isNotEmpty() && newIndex !in fi) {
+                    val next = fi.firstOrNull { it > newIndex } ?: fi.first()
+                    player.jumpToItem(next)
+                    player.play()
+                    return@collect
+                }
                 title = player.currentItem?.title ?: ""
                 artist = player.currentItem?.artist ?: ""
                 artwork = player.currentItem?.artwork ?: ""
                 duration = player.currentItem?.duration ?: 0L
                 isLive = player.isCurrentMediaItemLive
-                currentTrackIndex = player.currentIndex
+                currentTrackIndex = newIndex
                 playlistItems = player.items
             }
         }
@@ -385,15 +449,20 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun reloadPlayer() {
+        val currentUrl = player.currentItem?.audioUrl
         lifecycleScope.launch {
             val items = withContext(Dispatchers.IO) { buildLocalAudioItems() }
             if (items.isEmpty()) return@launch
             player.stop()
-            player.removeUpcomingItems()
+            player.clear()
             player.add(items)
+            val resumeIndex = if (currentUrl != null)
+                items.indexOfFirst { it.audioUrl == currentUrl }.coerceAtLeast(0)
+            else 0
+            if (resumeIndex > 0) player.jumpToItem(resumeIndex)
             player.play()
             playlistItems = player.items
-            currentTrackIndex = 0
+            currentTrackIndex = player.currentIndex
         }
     }
 
@@ -402,13 +471,16 @@ class MainActivity : ComponentActivity() {
         val audioDir = File(Environment.getExternalStorageDirectory(), appSettings.localFolderName)
         if (!audioDir.exists() || !audioDir.isDirectory) return emptyList()
         val files = audioDir.walkTopDown()
-            .filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS }
+            .filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS && it.length() > 4096 }
             .let { seq ->
                 if (playlistMode == PlaylistMode.SHUFFLE) seq.toList().shuffled()
                 else seq.sortedWith(compareBy({ it.parent }, { it.name })).toList()
             }
         return files.map { file ->
-            val folderName = if (file.parentFile == audioDir) "" else file.parentFile?.name ?: ""
+            val folderName = file.parentFile
+                ?.takeIf { it != audioDir }
+                ?.toRelativeString(audioDir)
+                ?: ""
             DefaultAudioItem(
                 audioUrl = "file://${file.absolutePath}",
                 type = MediaType.DEFAULT,
@@ -548,6 +620,10 @@ fun PlaylistView(
     items: List<AudioItem>,
     currentIndex: Int,
     onItemClick: (Int) -> Unit,
+    filterQuery: String,
+    onFilterQueryChange: (String) -> Unit,
+    filterInverted: Boolean,
+    onFilterInvertedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Sortare alfabetică după folder + titlu, cu păstrarea indexului original din player
@@ -559,54 +635,95 @@ fun PlaylistView(
             ))
     }
 
-    // Poziția cântecului curent în lista sortată
-    val sortedCurrentPos = remember(sorted, currentIndex) {
-        sorted.indexOfFirst { it.first == currentIndex }.coerceAtLeast(0)
+    // Filtrare — cântecul care cântă nu este afectat de filtru (rămâne în player)
+    val filtered = remember(sorted, filterQuery, filterInverted) {
+        if (filterQuery.isBlank()) {
+            sorted
+        } else {
+            val q = filterQuery.trim().lowercase()
+            sorted.filter { (_, item) ->
+                val matches = (item.title ?: "").lowercase().contains(q) ||
+                              (item.artist ?: "").lowercase().contains(q)
+                if (filterInverted) !matches else matches
+            }
+        }
+    }
+
+    // Poziția cântecului curent în lista filtrată
+    val currentPosInFiltered = remember(filtered, currentIndex) {
+        filtered.indexOfFirst { it.first == currentIndex }
     }
 
     val listState = rememberLazyListState()
 
-    LaunchedEffect(sortedCurrentPos) {
-        if (sorted.isNotEmpty()) {
-            listState.animateScrollToItem(sortedCurrentPos)
+    LaunchedEffect(currentPosInFiltered) {
+        if (currentPosInFiltered >= 0) {
+            listState.animateScrollToItem(currentPosInFiltered)
         }
     }
 
-    LazyColumn(
-        state = listState,
-        modifier = modifier.fillMaxWidth()
-    ) {
-        itemsIndexed(sorted) { _, (playerIndex, item) ->
-            val isPlaying = playerIndex == currentIndex
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        if (isPlaying) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surface
-                    )
-                    .clickable { onItemClick(playerIndex) }
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    if (!item.artist.isNullOrEmpty()) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth()
+        ) {
+            itemsIndexed(filtered) { _, (playerIndex, item) ->
+                val isPlaying = playerIndex == currentIndex
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (isPlaying) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surface
+                        )
+                        .clickable { onItemClick(playerIndex) }
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        if (!item.artist.isNullOrEmpty()) {
+                            Text(
+                                text = item.artist!!,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isPlaying) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
                         Text(
-                            text = item.artist!!,
-                            style = MaterialTheme.typography.labelSmall,
+                            text = item.title ?: "",
+                            style = MaterialTheme.typography.bodyMedium,
                             color = if (isPlaying) MaterialTheme.colorScheme.onPrimaryContainer
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    else MaterialTheme.colorScheme.onSurface,
                             maxLines = 1
                         )
                     }
-                    Text(
-                        text = item.title ?: "",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isPlaying) MaterialTheme.colorScheme.onPrimaryContainer
-                                else MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1
-                    )
                 }
+            }
+        }
+
+        // Bara de filtrare — în partea de jos a playlist-ului
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = filterQuery,
+                onValueChange = onFilterQueryChange,
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Filtrează...", style = MaterialTheme.typography.bodyMedium) },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium
+            )
+            IconButton(onClick = { onFilterInvertedChange(!filterInverted) }) {
+                Icon(
+                    imageVector = if (filterInverted) Icons.Rounded.FilterListOff else Icons.Rounded.FilterList,
+                    contentDescription = if (filterInverted) "Anulează inversare" else "Inversează filtrul",
+                    tint = if (filterInverted) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -647,7 +764,7 @@ fun MainScreen(
 @Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
 @Composable
 fun ContentPreview() {
-    KotlinAudioTheme {
+    BecashPlayerTheme {
         MainScreen(
             title = "Title", artist = "Artist", artwork = "",
             position = 1000, duration = 6000, isLive = false, isPaused = true

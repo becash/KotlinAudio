@@ -1,4 +1,4 @@
-package com.example.kotlin_audio_example
+package com.becash.becashplayer
 
 import org.junit.Test
 

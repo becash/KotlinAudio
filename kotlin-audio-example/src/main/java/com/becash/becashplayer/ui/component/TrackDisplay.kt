@@ -1,4 +1,4 @@
-package com.example.kotlin_audio_example.ui.component
+package com.becash.becashplayer.ui.component
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,8 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.example.kotlin_audio_example.ext.millisecondsToString
-import com.example.kotlin_audio_example.ui.theme.KotlinAudioTheme
+import com.becash.becashplayer.ext.millisecondsToString
+import com.becash.becashplayer.ui.theme.BecashPlayerTheme
 
 @Composable
 fun TrackDisplay(
@@ -95,7 +95,7 @@ fun TrackDisplay(
 @Preview(showBackground = true)
 @Composable
 fun TrackDisplayPreview() {
-    KotlinAudioTheme {
+    BecashPlayerTheme {
         TrackDisplay(
             title = "Title",
             artist = "Artist",
@@ -110,7 +110,7 @@ fun TrackDisplayPreview() {
 @Preview(showBackground = true)
 @Composable
 fun TrackDisplayLivePreview() {
-    KotlinAudioTheme {
+    BecashPlayerTheme {
         TrackDisplay(
             title = "Title",
             artist = "Artist",

@@ -1,4 +1,4 @@
-package com.example.kotlin_audio_example.ext
+package com.becash.becashplayer.ext
 
 fun Long.millisecondsToString(): String {
     val seconds = this / 1000

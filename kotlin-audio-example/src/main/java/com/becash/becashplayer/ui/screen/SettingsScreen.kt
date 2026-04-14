@@ -1,4 +1,4 @@
-package com.example.kotlin_audio_example.ui.screen
+package com.becash.becashplayer.ui.screen
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -33,7 +33,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.example.kotlin_audio_example.AppSettings
+import com.becash.becashplayer.AppSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
