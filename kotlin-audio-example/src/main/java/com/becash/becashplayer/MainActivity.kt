@@ -37,7 +37,15 @@ import androidx.compose.material.icons.rounded.FilterListOff
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.EmojiPeople
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,6 +68,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.size
 import android.content.Context
 import android.view.WindowManager
 import androidx.compose.ui.platform.LocalConfiguration
@@ -93,6 +102,8 @@ import timber.log.Timber
 import java.io.File
 import java.util.concurrent.TimeUnit
 
+enum class RatingFilter { ALL, WITH_RATING, NO_RATING, TOP, BEST, DANCE }
+
 enum class PlaylistMode {
     SHUFFLE, NORMAL, PLAY_ONE;
     fun next() = when (this) {
@@ -120,6 +131,10 @@ class MainActivity : ComponentActivity() {
     private var filterInverted by mutableStateOf(false)
     private var songInfoMap by mutableStateOf<Map<String, JSONObject>>(emptyMap())
     private var isDbSyncBusy by mutableStateOf(false)
+    private var ratingFilter by mutableStateOf(RatingFilter.ALL)
+
+    private val audioBaseDir: String
+        get() = File(Environment.getExternalStorageDirectory(), appSettings.localFolderName).absolutePath
 
     /**
      * Lista de indecși din player (în ordine sortată) care trec filtrul curent.
@@ -132,15 +147,36 @@ class MainActivity : ComponentActivity() {
             val indexed = playlistItems.mapIndexed { i, item -> i to item }
             val ordered = if (playlistMode == PlaylistMode.SHUFFLE) indexed
                           else indexed.sortedWith(compareBy({ it.second.artist ?: "" }, { it.second.title ?: "" }))
-            return if (filterQuery.isBlank()) ordered.map { it.first }
+
+            val afterText = if (filterQuery.isBlank()) ordered
             else {
                 val q = filterQuery.trim().lowercase()
                 ordered.filter { (_, item) ->
                     val matches = (item.title ?: "").lowercase().contains(q) ||
                                   (item.artist ?: "").lowercase().contains(q)
                     if (filterInverted) !matches else matches
-                }.map { it.first }
+                }
             }
+
+            val afterRating = if (ratingFilter == RatingFilter.ALL) afterText
+            else {
+                val base = audioBaseDir
+                afterText.filter { (_, item) ->
+                    val relPath = item.audioUrl.removePrefix("file://$base")
+                    val rate = songInfoMap[relPath]?.optInt("rate", 0) ?: 0
+                    val dance = songInfoMap[relPath]?.opt("dance").let { it == true || it == 1 || it?.toString() == "1" }
+                    when (ratingFilter) {
+                        RatingFilter.WITH_RATING -> rate > 0
+                        RatingFilter.NO_RATING   -> rate == 0
+                        RatingFilter.TOP         -> rate >= 4
+                        RatingFilter.BEST        -> rate == 5
+                        RatingFilter.DANCE       -> dance
+                        RatingFilter.ALL         -> true
+                    }
+                }
+            }
+
+            return afterRating.map { it.first }
         }
 
     private fun nextFiltered() {
@@ -278,24 +314,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Map audioUrl → JSONObject (rând MySQL) pentru a afișa durata în playlist
-        val audioBaseDir = remember {
-            File(Environment.getExternalStorageDirectory(), appSettings.localFolderName).absolutePath
-        }
-        val songInfoByUrl = remember(songInfoMap) {
-            songInfoMap.entries.associate { (songId, doc) ->
-                "file://$audioBaseDir/${songId.trimStart('/')}" to doc
-            }
-        }
-
-        var title by remember { mutableStateOf("") }
-        var artist by remember { mutableStateOf("") }
-        var artwork by remember { mutableStateOf("") }
-        var position by remember { mutableStateOf(0L) }
-        var duration by remember { mutableStateOf(0L) }
-        var isLive by remember { mutableStateOf(false) }
-
-        // Detectare mod split-screen: fereastra ocupă mai puțin de 60% din ecran
+        // Detectare mod split-screen
         val context = LocalContext.current
         val density = LocalDensity.current
         val screenHeightPx = remember {
@@ -313,13 +332,28 @@ class MainActivity : ComponentActivity() {
         val windowHeightDp = LocalConfiguration.current.screenHeightDp.dp
         val isSplitMode = windowHeightDp < screenHeightDp * 0.6f
 
+        // Map audioUrl → JSONObject (rând MySQL) pentru a afișa durata în playlist
+        val audioBaseDir = remember {
+            File(Environment.getExternalStorageDirectory(), appSettings.localFolderName).absolutePath
+        }
+        val songInfoByUrl = remember(songInfoMap) {
+            songInfoMap.entries.associate { (songId, doc) ->
+                "file://$audioBaseDir/${songId.trimStart('/')}" to doc
+            }
+        }
+
+        var title by remember { mutableStateOf("") }
+        var artist by remember { mutableStateOf("") }
+        var artwork by remember { mutableStateOf("") }
+        var position by remember { mutableStateOf(0L) }
+        var duration by remember { mutableStateOf(0L) }
+        var isLive by remember { mutableStateOf(false) }
+
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
                 SyncStatusBar(syncState = syncState)
 
-                // Bara de acțiuni — ascunsă în mod split-screen
-                if (!isSplitMode) {
-                    Row(
+                Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -339,16 +373,43 @@ class MainActivity : ComponentActivity() {
                             }
                             Icon(icon, contentDescription = playlistMode.label, tint = tint)
                         }
-                        // Sincronizare Nextcloud
-                        IconButton(onClick = { startSync() }) {
-                            Icon(
-                                Icons.Rounded.Sync,
-                                contentDescription = "Sincronizează Nextcloud",
-                                tint = if (syncState is SyncState.Syncing)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurface
-                            )
+                        // Meniu: Sync + Bariere
+                        var menuExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { menuExpanded = true }) {
+                                Icon(
+                                    Icons.Rounded.MoreVert,
+                                    contentDescription = "Mai multe opțiuni",
+                                    tint = if (syncState is SyncState.Syncing)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Sincronizează Nextcloud") },
+                                    leadingIcon = { Icon(Icons.Rounded.Sync, contentDescription = null) },
+                                    onClick = { menuExpanded = false; startSync() }
+                                )
+                                if (appSettings.bariera9.isNotBlank()) {
+                                    DropdownMenuItem(
+                                        text = { Text("Bariera 9 — ${appSettings.bariera9}") },
+                                        leadingIcon = { Text("9", style = MaterialTheme.typography.titleMedium) },
+                                        onClick = { menuExpanded = false; callPhone(appSettings.bariera9) }
+                                    )
+                                }
+                                if (appSettings.bariera10.isNotBlank()) {
+                                    DropdownMenuItem(
+                                        text = { Text("Bariera 10 — ${appSettings.bariera10}") },
+                                        leadingIcon = { Text("10", style = MaterialTheme.typography.titleMedium) },
+                                        onClick = { menuExpanded = false; callPhone(appSettings.bariera10) }
+                                    )
+                                }
+                            }
                         }
                         Spacer(modifier = Modifier.weight(1f))
                         // Șterge cântecul curent (local + Nextcloud) și trece la următor
@@ -360,12 +421,34 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
-                }
 
                 // Playlist — se întinde ocupând tot spațiul disponibil
-                // Calculăm poziția exactă ca în PlaylistView: sortare alfabetică + filtru
-                val sortedForLabel = remember(playlistItems) {
+                // Indecșii playerului care trec filtrul de rating
+                val ratingFilterSet = remember(ratingFilter, songInfoMap, playlistItems) {
+                    if (ratingFilter == RatingFilter.ALL) null
+                    else {
+                        val base = audioBaseDir
+                        playlistItems.mapIndexedNotNull { idx, item ->
+                            val relPath = item.audioUrl.removePrefix("file://$base")
+                            val rate = songInfoMap[relPath]?.optInt("rate", 0) ?: 0
+                            val dance = songInfoMap[relPath]?.opt("dance").let { it == true || it == 1 || it?.toString() == "1" }
+                            val passes = when (ratingFilter) {
+                                RatingFilter.WITH_RATING -> rate > 0
+                                RatingFilter.NO_RATING   -> rate == 0
+                                RatingFilter.TOP         -> rate >= 4
+                                RatingFilter.BEST        -> rate == 5
+                                RatingFilter.DANCE       -> dance
+                                RatingFilter.ALL         -> true
+                            }
+                            if (passes) idx else null
+                        }.toSet()
+                    }
+                }
+
+                // Calculăm poziția exactă ca în PlaylistView: sortare alfabetică + filtru rating + filtru text
+                val sortedForLabel = remember(playlistItems, ratingFilterSet) {
                     playlistItems.mapIndexed { i, item -> i to item }
+                        .filter { (i, _) -> ratingFilterSet == null || i in ratingFilterSet }
                         .sortedWith(compareBy({ it.second.artist ?: "" }, { it.second.title ?: "" }))
                 }
                 val filteredForLabel = remember(sortedForLabel, filterQuery, filterInverted) {
@@ -383,22 +466,87 @@ class MainActivity : ComponentActivity() {
                     .takeIf { it >= 0 }?.plus(1)
                 val trackLabel = if (trackPos != null) "$trackPos / ${filteredForLabel.size}" else ""
 
-                // Playlist și bara de căutare — ascunse în mod split-screen
+                // Playlist + bara de filtrare — dispar în split-mode
                 if (!isSplitMode) {
                     PlaylistView(
                         items = playlistItems,
                         currentIndex = currentTrackIndex,
                         onItemClick = { index -> player.jumpToItem(index); player.play() },
                         filterQuery = filterQuery,
-                        onFilterQueryChange = { filterQuery = it; appSettings.filterQuery = it },
                         filterInverted = filterInverted,
-                        onFilterInvertedChange = { filterInverted = it; appSettings.filterInverted = it },
                         songInfoByUrl = songInfoByUrl,
-                        trackLabel = trackLabel,
+                        allowedIndices = ratingFilterSet,
                         modifier = Modifier.weight(1f)
                     )
-                } else {
-                    Spacer(modifier = Modifier.weight(1f))
+                    // Bara de filtrare
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (trackLabel.isNotEmpty()) {
+                            Text(
+                                text = trackLabel,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(start = 4.dp, end = 6.dp)
+                            )
+                        }
+                        OutlinedTextField(
+                            value = filterQuery,
+                            onValueChange = { filterQuery = it; appSettings.filterQuery = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = { Text("Filtrează...", style = MaterialTheme.typography.bodyMedium) },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium
+                        )
+                        IconButton(onClick = { filterInverted = !filterInverted; appSettings.filterInverted = filterInverted }) {
+                            Icon(
+                                imageVector = if (filterInverted) Icons.Rounded.FilterListOff else Icons.Rounded.FilterList,
+                                contentDescription = null,
+                                tint = if (filterInverted) MaterialTheme.colorScheme.primary
+                                       else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // Lista playlisturilor (chipuri rating) — mereu vizibilă
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf(
+                        RatingFilter.NO_RATING   to Icons.Rounded.StarBorder,
+                        RatingFilter.WITH_RATING to Icons.Rounded.Star,
+                        RatingFilter.TOP         to Icons.Rounded.Person,
+                        RatingFilter.BEST        to Icons.Rounded.Public,
+                        RatingFilter.DANCE       to Icons.Rounded.EmojiPeople,
+                    ).forEach { (filter, icon) ->
+                        val active = ratingFilter == filter
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    color = if (active) MaterialTheme.colorScheme.primaryContainer
+                                            else MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = MaterialTheme.shapes.medium
+                                )
+                                .clickable { ratingFilter = if (active) RatingFilter.ALL else filter }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                icon,
+                                contentDescription = null,
+                                tint = if (active) MaterialTheme.colorScheme.onPrimaryContainer
+                                       else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
 
                 TrackDisplay(
@@ -429,7 +577,7 @@ class MainActivity : ComponentActivity() {
                 val newIndex = player.currentIndex
                 // Dacă filtrul e activ și piesa nouă nu e în lista filtrată, sari la următoarea filtrată
                 val fi = filteredIndices
-                if (filterQuery.isNotBlank() && fi.isNotEmpty() && newIndex !in fi) {
+                if ((filterQuery.isNotBlank() || ratingFilter != RatingFilter.ALL) && fi.isNotEmpty() && newIndex !in fi) {
                     val next = fi.firstOrNull { it > newIndex } ?: fi.first()
                     player.jumpToItem(next)
                     player.play()
@@ -486,6 +634,8 @@ class MainActivity : ComponentActivity() {
                 val updated = PlaylistStore.load(this@MainActivity, audioRootDir.absolutePath).filter { it != localPath }
                 PlaylistStore.save(this@MainActivity, updated, audioRootDir.absolutePath)
             }
+            // Reîncarcă queue-ul playerului și actualizează playlistItems (fără cântecul șters)
+            reloadPlayer()
             WebDavSync.deleteFile(
                 serverUrl = appSettings.serverUrl,
                 username = appSettings.username,
@@ -701,6 +851,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun callPhone(number: String) {
+        if (number.isBlank()) return
+        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number"))
+        startActivity(intent)
+    }
+
     private fun hasStoragePermission(): Boolean =
         requiredPermissions.all {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
@@ -760,16 +916,16 @@ fun PlaylistView(
     currentIndex: Int,
     onItemClick: (Int) -> Unit,
     filterQuery: String,
-    onFilterQueryChange: (String) -> Unit,
     filterInverted: Boolean,
-    onFilterInvertedChange: (Boolean) -> Unit,
     songInfoByUrl: Map<String, JSONObject> = emptyMap(),
-    trackLabel: String = "",
+    allowedIndices: Set<Int>? = null,
     modifier: Modifier = Modifier,
 ) {
     // Sortare alfabetică după folder + titlu, cu păstrarea indexului original din player
-    val sorted = remember(items) {
+    // allowedIndices limitează la indicii care trec filtrul de rating
+    val sorted = remember(items, allowedIndices) {
         items.mapIndexed { index, item -> index to item }
+            .filter { (idx, _) -> allowedIndices == null || idx in allowedIndices }
             .sortedWith(compareBy(
                 { it.second.artist ?: "" },
                 { it.second.title ?: "" }
@@ -860,38 +1016,6 @@ fun PlaylistView(
             }
         }
 
-        // Bara de filtrare — în partea de jos a playlist-ului
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (trackLabel.isNotEmpty()) {
-                Text(
-                    text = trackLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 4.dp, end = 8.dp)
-                )
-            }
-            OutlinedTextField(
-                value = filterQuery,
-                onValueChange = onFilterQueryChange,
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Filtrează...", style = MaterialTheme.typography.bodyMedium) },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium
-            )
-            IconButton(onClick = { onFilterInvertedChange(!filterInverted) }) {
-                Icon(
-                    imageVector = if (filterInverted) Icons.Rounded.FilterListOff else Icons.Rounded.FilterList,
-                    contentDescription = if (filterInverted) "Anulează inversare" else "Inversează filtrul",
-                    tint = if (filterInverted) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
     }
 }
 
