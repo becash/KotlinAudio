@@ -7,7 +7,7 @@ import java.io.File
 object SongInfoStore {
     private const val FILE_NAME = "song_info.json"
 
-    /** Returnează map: cheie relativă ("883/song.mp3") → tot documentul MongoDB ca JSONObject */
+    /** Returnează map: cheie relativă ("883/song.mp3") → rândul MySQL ca JSONObject */
     fun load(context: Context): Map<String, JSONObject> {
         val file = File(context.getExternalFilesDir(null), FILE_NAME)
         if (!file.exists()) return emptyMap()
@@ -23,7 +23,7 @@ object SongInfoStore {
         }
     }
 
-    /** Salvează map: cheie relativă → document MongoDB complet */
+    /** Salvează map: cheie relativă → rândul MySQL complet */
     fun save(context: Context, data: Map<String, JSONObject>) {
         val obj = JSONObject()
         data.forEach { (key, doc) -> obj.put(key, doc) }

@@ -46,7 +46,11 @@ fun SettingsScreen(
     var password by remember { mutableStateOf(settings.password) }
     var remoteFolderPath by remember { mutableStateOf(settings.remoteFolderPath) }
     var localFolderName by remember { mutableStateOf(settings.localFolderName) }
-    var mongoUrl by remember { mutableStateOf(settings.mongoUrl) }
+    var mysqlHost by remember { mutableStateOf(settings.mysqlHost) }
+    var mysqlPort by remember { mutableStateOf(settings.mysqlPort.toString()) }
+    var mysqlUser by remember { mutableStateOf(settings.mysqlUser) }
+    var mysqlPassword by remember { mutableStateOf(settings.mysqlPassword) }
+    var mysqlDatabase by remember { mutableStateOf(settings.mysqlDatabase) }
     var passwordVisible by remember { mutableStateOf(false) }
     var savedMessage by remember { mutableStateOf(false) }
 
@@ -165,19 +169,63 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(20.dp))
 
                 Text(
-                    text = "MongoDB",
+                    text = "Bază de date MySQL",
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
 
                 OutlinedTextField(
-                    value = mongoUrl,
-                    onValueChange = { mongoUrl = it },
-                    label = { Text("MongoDB URL") },
-                    placeholder = { Text("mongodb://root:parola@server:27017") },
-                    supportingText = { Text("Connection string pentru baza de date") },
+                    value = mysqlHost,
+                    onValueChange = { mysqlHost = it },
+                    label = { Text("Host MySQL") },
+                    placeholder = { Text("c.ci.md") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = mysqlPort,
+                    onValueChange = { mysqlPort = it },
+                    label = { Text("Port MySQL") },
+                    placeholder = { Text("3306") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = mysqlUser,
+                    onValueChange = { mysqlUser = it },
+                    label = { Text("Utilizator MySQL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = mysqlPassword,
+                    onValueChange = { mysqlPassword = it },
+                    label = { Text("Parolă MySQL") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = mysqlDatabase,
+                    onValueChange = { mysqlDatabase = it },
+                    label = { Text("Bază de date") },
+                    placeholder = { Text("becash_player") },
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -192,7 +240,11 @@ fun SettingsScreen(
                             if (it.startsWith('/')) it else "/$it"
                         }
                         settings.localFolderName = localFolderName.trim().ifEmpty { "Audio" }
-                        settings.mongoUrl = mongoUrl.trim()
+                        settings.mysqlHost = mysqlHost.trim()
+                        settings.mysqlPort = mysqlPort.trim().toIntOrNull() ?: 3306
+                        settings.mysqlUser = mysqlUser.trim()
+                        settings.mysqlPassword = mysqlPassword
+                        settings.mysqlDatabase = mysqlDatabase.trim().ifEmpty { "becash_player" }
                         savedMessage = true
                     },
                     modifier = Modifier.fillMaxWidth()

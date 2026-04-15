@@ -60,7 +60,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import android.content.Context
 import android.view.WindowManager
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.doublesymmetry.kotlinaudio.models.AudioItem
@@ -115,7 +119,7 @@ class MainActivity : ComponentActivity() {
     private var filterQuery by mutableStateOf("")
     private var filterInverted by mutableStateOf(false)
     private var songInfoMap by mutableStateOf<Map<String, JSONObject>>(emptyMap())
-    private var isMongoBusy by mutableStateOf(false)
+    private var isDbSyncBusy by mutableStateOf(false)
 
     /**
      * Lista de indecși din player (în ordine sortată) care trec filtrul curent.
@@ -219,7 +223,7 @@ class MainActivity : ComponentActivity() {
             if (!dir.exists()) dir.mkdirs()
         }
 
-        // Încarcă cache-ul MongoDB local
+        // Încarcă cache-ul MySQL local
         songInfoMap = SongInfoStore.load(this)
 
         if (hasStoragePermission()) {
@@ -274,13 +278,13 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Map audioUrl → JSONObject (document MongoDB) pentru a afișa durata în playlist
+        // Map audioUrl → JSONObject (rând MySQL) pentru a afișa durata în playlist
         val audioBaseDir = remember {
             File(Environment.getExternalStorageDirectory(), appSettings.localFolderName).absolutePath
         }
         val songInfoByUrl = remember(songInfoMap) {
-            songInfoMap.entries.associate { (mongoId, doc) ->
-                "file://$audioBaseDir/${mongoId.trimStart('/')}" to doc
+            songInfoMap.entries.associate { (songId, doc) ->
+                "file://$audioBaseDir/${songId.trimStart('/')}" to doc
             }
         }
 
@@ -290,50 +294,71 @@ class MainActivity : ComponentActivity() {
         var position by remember { mutableStateOf(0L) }
         var duration by remember { mutableStateOf(0L) }
         var isLive by remember { mutableStateOf(false) }
+
+        // Detectare mod split-screen: fereastra ocupă mai puțin de 60% din ecran
+        val context = LocalContext.current
+        val density = LocalDensity.current
+        val screenHeightPx = remember {
+            val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                wm.maximumWindowMetrics.bounds.height()
+            } else {
+                val dm = android.util.DisplayMetrics()
+                @Suppress("DEPRECATION")
+                wm.defaultDisplay.getRealMetrics(dm)
+                dm.heightPixels
+            }
+        }
+        val screenHeightDp = with(density) { screenHeightPx.toDp() }
+        val windowHeightDp = LocalConfiguration.current.screenHeightDp.dp
+        val isSplitMode = windowHeightDp < screenHeightDp * 0.6f
+
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
                 SyncStatusBar(syncState = syncState)
 
-                // Bara de acțiuni — butoane suplimentare vor fi adăugate aici
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.Start,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Mod playlist
-                    IconButton(onClick = { applyPlaylistMode(playlistMode.next()) }) {
-                        val icon = when (playlistMode) {
-                            PlaylistMode.SHUFFLE  -> Icons.Rounded.Shuffle
-                            PlaylistMode.NORMAL   -> Icons.Rounded.Repeat
-                            PlaylistMode.PLAY_ONE -> Icons.Rounded.RepeatOne
+                // Bara de acțiuni — ascunsă în mod split-screen
+                if (!isSplitMode) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.Start,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Mod playlist
+                        IconButton(onClick = { applyPlaylistMode(playlistMode.next()) }) {
+                            val icon = when (playlistMode) {
+                                PlaylistMode.SHUFFLE  -> Icons.Rounded.Shuffle
+                                PlaylistMode.NORMAL   -> Icons.Rounded.Repeat
+                                PlaylistMode.PLAY_ONE -> Icons.Rounded.RepeatOne
+                            }
+                            val tint = when (playlistMode) {
+                                PlaylistMode.NORMAL -> MaterialTheme.colorScheme.onSurface
+                                else               -> MaterialTheme.colorScheme.primary
+                            }
+                            Icon(icon, contentDescription = playlistMode.label, tint = tint)
                         }
-                        val tint = when (playlistMode) {
-                            PlaylistMode.NORMAL -> MaterialTheme.colorScheme.onSurface
-                            else               -> MaterialTheme.colorScheme.primary
+                        // Sincronizare Nextcloud
+                        IconButton(onClick = { startSync() }) {
+                            Icon(
+                                Icons.Rounded.Sync,
+                                contentDescription = "Sincronizează Nextcloud",
+                                tint = if (syncState is SyncState.Syncing)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.onSurface
+                            )
                         }
-                        Icon(icon, contentDescription = playlistMode.label, tint = tint)
-                    }
-                    // Sincronizare Nextcloud
-                    IconButton(onClick = { startSync() }) {
-                        Icon(
-                            Icons.Rounded.Sync,
-                            contentDescription = "Sincronizează Nextcloud",
-                            tint = if (syncState is SyncState.Syncing)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    Spacer(modifier = Modifier.weight(1f))
-                    // Șterge cântecul curent (local + Nextcloud) și trece la următor
-                    IconButton(onClick = { deleteCurrentTrack() }) {
-                        Icon(
-                            Icons.Rounded.DeleteForever,
-                            contentDescription = "Șterge cântecul curent",
-                            tint = MaterialTheme.colorScheme.error
-                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                        // Șterge cântecul curent (local + Nextcloud) și trece la următor
+                        IconButton(onClick = { deleteCurrentTrack() }) {
+                            Icon(
+                                Icons.Rounded.DeleteForever,
+                                contentDescription = "Șterge cântecul curent",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
 
@@ -358,18 +383,23 @@ class MainActivity : ComponentActivity() {
                     .takeIf { it >= 0 }?.plus(1)
                 val trackLabel = if (trackPos != null) "$trackPos / ${filteredForLabel.size}" else ""
 
-                PlaylistView(
-                    items = playlistItems,
-                    currentIndex = currentTrackIndex,
-                    onItemClick = { index -> player.jumpToItem(index); player.play() },
-                    filterQuery = filterQuery,
-                    onFilterQueryChange = { filterQuery = it; appSettings.filterQuery = it },
-                    filterInverted = filterInverted,
-                    onFilterInvertedChange = { filterInverted = it; appSettings.filterInverted = it },
-                    songInfoByUrl = songInfoByUrl,
-                    trackLabel = trackLabel,
-                    modifier = Modifier.weight(1f)
-                )
+                // Playlist și bara de căutare — ascunse în mod split-screen
+                if (!isSplitMode) {
+                    PlaylistView(
+                        items = playlistItems,
+                        currentIndex = currentTrackIndex,
+                        onItemClick = { index -> player.jumpToItem(index); player.play() },
+                        filterQuery = filterQuery,
+                        onFilterQueryChange = { filterQuery = it; appSettings.filterQuery = it },
+                        filterInverted = filterInverted,
+                        onFilterInvertedChange = { filterInverted = it; appSettings.filterInverted = it },
+                        songInfoByUrl = songInfoByUrl,
+                        trackLabel = trackLabel,
+                        modifier = Modifier.weight(1f)
+                    )
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
 
                 TrackDisplay(
                     title = title, artist = artist, artwork = artwork,
@@ -622,8 +652,8 @@ class MainActivity : ComponentActivity() {
                             "Sincronizare completă: ${state.downloaded} descărcate, ${state.skipped} existau deja.",
                             Toast.LENGTH_LONG
                         ).show()
-                        // Imediat după Nextcloud, sincronizăm și datele din MongoDB
-                        startMongoSync()
+                        // Imediat după Nextcloud, sincronizăm și datele din MySQL
+                        startDbSync()
                     }
                     if (state is SyncState.Error) {
                         Toast.makeText(this@MainActivity, state.message, Toast.LENGTH_LONG).show()
@@ -633,34 +663,41 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startMongoSync() {
-        if (appSettings.mongoUrl.isBlank()) {
-            Toast.makeText(this, "Configurează URL-ul MongoDB în setări.", Toast.LENGTH_LONG).show()
+    private fun startDbSync() {
+        if (appSettings.mysqlHost.isBlank()) {
+            Toast.makeText(this, "Configurează conexiunea MySQL în setări.", Toast.LENGTH_LONG).show()
             currentScreen = Screen.Settings
             return
         }
-        isMongoBusy = true
+        isDbSyncBusy = true
         lifecycleScope.launch {
             try {
                 // Cheile relative locale (ex: "883/song.mp3") — fără baseDir
                 val localFiles = withContext(Dispatchers.IO) {
                     PlaylistStore.load(this@MainActivity).toSet()
                 }
-                val result = MongoSync.sync(appSettings.mongoUrl, localFiles)
+                val result = DbSync.sync(
+                    host = appSettings.mysqlHost,
+                    port = appSettings.mysqlPort,
+                    user = appSettings.mysqlUser,
+                    password = appSettings.mysqlPassword,
+                    database = appSettings.mysqlDatabase,
+                    localFiles = localFiles,
+                )
                 withContext(Dispatchers.IO) {
                     SongInfoStore.save(this@MainActivity, result)
                 }
                 songInfoMap = result
                 Toast.makeText(
                     this@MainActivity,
-                    "MongoDB: ${result.size} cântece sincronizate.",
+                    "MySQL: ${result.size} cântece sincronizate.",
                     Toast.LENGTH_SHORT
                 ).show()
             } catch (e: Exception) {
-                Timber.e(e, "MongoSync error")
-                Toast.makeText(this@MainActivity, "Eroare MongoDB: ${e.message}", Toast.LENGTH_LONG).show()
+                Timber.e(e, "DbSync error")
+                Toast.makeText(this@MainActivity, "Eroare MySQL: ${e.message}", Toast.LENGTH_LONG).show()
             } finally {
-                isMongoBusy = false
+                isDbSyncBusy = false
             }
         }
     }

@@ -1,63 +1,67 @@
 package com.becash.becashplayer
 
-import com.mongodb.client.model.Filters
-import com.mongodb.kotlin.client.coroutine.MongoClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.bson.Document
 import org.json.JSONObject
 import timber.log.Timber
+import java.sql.DriverManager
 
-object MongoSync {
+object DbSync {
 
-    /**
-     * Descarcă colecția `played` din MongoDB și returnează un map
-     * _id MongoDB → tot documentul MongoDB (fără _id).
-     *
-     * _id din MongoDB este identic cu _id din playlist.json —
-     * comparăm direct, fără nicio transformare.
-     *
-     * [localFiles] = set de _id din playlist.json
-     */
-    suspend fun sync(mongoUrl: String, localFiles: Set<String>): Map<String, JSONObject> =
-        withContext(Dispatchers.IO) {
-            val client = MongoClient.create(mongoUrl)
-            try {
-                val collection = client
-                    .getDatabase("becash_player")
-                    .getCollection<Document>("played")
+    suspend fun sync(
+        host: String,
+        port: Int,
+        user: String,
+        password: String,
+        database: String,
+        localFiles: Set<String>
+    ): Map<String, JSONObject> = withContext(Dispatchers.IO) {
+        if (localFiles.isEmpty()) return@withContext emptyMap()
 
-                val result = mutableMapOf<String, JSONObject>()
+        Class.forName("com.mysql.jdbc.Driver")
+        val baseUrl = "jdbc:mysql://$host:$port" +
+                "?useSSL=false&connectTimeout=5000&socketTimeout=10000" +
+                "&useUnicode=true&characterEncoding=UTF-8"
 
-                collection.find(Filters.ne("delete", 1)).collect { doc ->
-                    val mongoId = doc.getString("_id") ?: return@collect
-                    if (mongoId in localFiles) {
-                        result[mongoId] = docToJson(doc)
+        // Conectare fără bază de date pentru a o crea dacă nu există
+        DriverManager.getConnection(baseUrl, user, password).use { conn ->
+            conn.createStatement().use { stmt ->
+                stmt.execute("CREATE DATABASE IF NOT EXISTS `$database` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                stmt.execute("USE `$database`")
+                stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS played (
+                        id       VARCHAR(500) PRIMARY KEY,
+                        plays    INT        DEFAULT 0,
+                        rate     TINYINT    DEFAULT 0,
+                        dance    TINYINT(1) DEFAULT 0,
+                        listen   BIGINT     DEFAULT 0,
+                        duration INT        DEFAULT 0,
+                        deleted  TINYINT(1) DEFAULT 0,
+                        updated  DATETIME   DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """.trimIndent())
+            }
+
+            val placeholders = localFiles.joinToString(",") { "?" }
+            conn.prepareStatement(
+                "SELECT * FROM played WHERE id IN ($placeholders) AND deleted = 0"
+            ).use { stmt ->
+                localFiles.forEachIndexed { i, id -> stmt.setString(i + 1, id) }
+                stmt.executeQuery().use { rs ->
+                    val meta = rs.metaData
+                    val result = mutableMapOf<String, JSONObject>()
+                    while (rs.next()) {
+                        val obj = JSONObject()
+                        for (col in 1..meta.columnCount) {
+                            val name = meta.getColumnName(col)
+                            if (name != "id") obj.put(name, rs.getObject(col))
+                        }
+                        result[rs.getString("id")] = obj
                     }
+                    Timber.i("DbSync: ${result.size}/${localFiles.size} cântece sincronizate")
+                    result
                 }
-
-                Timber.i("MongoSync: ${result.size}/${localFiles.size} cântece sincronizate")
-                result
-            } finally {
-                client.close()
             }
         }
-
-    /** Convertește un Document BSON în JSONObject, fără câmpul _id */
-    private fun docToJson(doc: Document): JSONObject {
-        val json = JSONObject()
-        doc.forEach { (key, value) ->
-            if (key == "_id") return@forEach
-            when (value) {
-                null        -> json.put(key, JSONObject.NULL)
-                is Boolean  -> json.put(key, value)
-                is Int      -> json.put(key, value)
-                is Long     -> json.put(key, value)
-                is Double   -> json.put(key, value)
-                is String   -> json.put(key, value)
-                else        -> json.put(key, value.toString())
-            }
-        }
-        return json
     }
 }
