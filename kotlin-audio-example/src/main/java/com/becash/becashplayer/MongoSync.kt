@@ -14,10 +14,7 @@ object DbSync {
         user: String,
         password: String,
         database: String,
-        localFiles: Set<String>
     ): Map<String, JSONObject> = withContext(Dispatchers.IO) {
-        if (localFiles.isEmpty()) return@withContext emptyMap()
-
         Class.forName("com.mysql.jdbc.Driver")
         val baseUrl = "jdbc:mysql://$host:$port" +
                 "?useSSL=false&connectTimeout=5000&socketTimeout=10000" +
@@ -40,14 +37,8 @@ object DbSync {
                         updated  DATETIME   DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """.trimIndent())
-            }
 
-            val placeholders = localFiles.joinToString(",") { "?" }
-            conn.prepareStatement(
-                "SELECT * FROM played WHERE id IN ($placeholders) AND deleted = 0"
-            ).use { stmt ->
-                localFiles.forEachIndexed { i, id -> stmt.setString(i + 1, id) }
-                stmt.executeQuery().use { rs ->
+                stmt.executeQuery("SELECT * FROM played WHERE deleted = 0").use { rs ->
                     val meta = rs.metaData
                     val result = mutableMapOf<String, JSONObject>()
                     while (rs.next()) {
@@ -58,7 +49,7 @@ object DbSync {
                         }
                         result[rs.getString("id")] = obj
                     }
-                    Timber.i("DbSync: ${result.size}/${localFiles.size} cântece sincronizate")
+                    Timber.i("DbSync: ${result.size} cântece descărcate din MySQL")
                     result
                 }
             }

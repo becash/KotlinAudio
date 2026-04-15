@@ -672,20 +672,19 @@ class MainActivity : ComponentActivity() {
         isDbSyncBusy = true
         lifecycleScope.launch {
             try {
-                // Cheile relative locale (ex: "883/song.mp3") — fără baseDir
-                val localFiles = withContext(Dispatchers.IO) {
-                    PlaylistStore.load(this@MainActivity).toSet()
-                }
+                // Descarcă întreaga tabelă played din MySQL
                 val result = DbSync.sync(
                     host = appSettings.mysqlHost,
                     port = appSettings.mysqlPort,
                     user = appSettings.mysqlUser,
                     password = appSettings.mysqlPassword,
                     database = appSettings.mysqlDatabase,
-                    localFiles = localFiles,
                 )
                 withContext(Dispatchers.IO) {
                     SongInfoStore.save(this@MainActivity, result)
+                    // Actualizează playlist.json cu datele din MySQL (mapping după id)
+                    val playlistIds = PlaylistStore.load(this@MainActivity)
+                    PlaylistStore.saveEnriched(this@MainActivity, playlistIds, result)
                 }
                 songInfoMap = result
                 Toast.makeText(
