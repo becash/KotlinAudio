@@ -553,7 +553,7 @@ class MainActivity : ComponentActivity() {
                     title = title, artist = artist, artwork = artwork,
                     position = position, duration = duration, isLive = isLive,
                     onSeek = { player.seek(it, TimeUnit.MILLISECONDS) },
-                    modifier = Modifier.padding(top = 16.dp)
+                    modifier = Modifier.padding(top = 4.dp)
                 )
                 PlayerControls(
                     onPrevious = { previousFiltered() },

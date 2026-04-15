@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -45,12 +46,12 @@ fun TrackDisplay(
                 text = artist,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 16.dp)
+                modifier = Modifier.padding(top = 4.dp)
             )
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(top = 4.dp)
+            modifier = Modifier.padding(top = 2.dp)
         ) {
             if (trackLabel.isNotEmpty()) {
                 Text(
@@ -71,35 +72,29 @@ fun TrackDisplay(
                 modifier = Modifier.padding(top = 16.dp)
             )
         else
-            Column {
-                Slider(
-                    value = if (duration == 0L) {
-                        0f
-                    } else {
-                        position.toFloat() / duration.toFloat()
-                    },
-                    onValueChange = {
-                        onSeek((it * duration).toLong())
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 16.dp, start = 8.dp, end = 8.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp, start = 8.dp, end = 8.dp)
+            ) {
+                Text(
+                    text = position.millisecondsToString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp),
-                ) {
-                    Text(
-                        text = position.millisecondsToString(),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Spacer(modifier = Modifier.weight(1f))
-                    Text(
-                        text = duration.millisecondsToString(),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Slider(
+                    value = if (duration == 0L) 0f else position.toFloat() / duration.toFloat(),
+                    onValueChange = { onSeek((it * duration).toLong()) },
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = duration.millisecondsToString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
     }
 }
