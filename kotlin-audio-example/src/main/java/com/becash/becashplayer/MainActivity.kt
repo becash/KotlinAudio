@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -102,6 +103,7 @@ import org.json.JSONObject
 import timber.log.Timber
 import java.io.File
 import java.util.concurrent.TimeUnit
+import kotlin.random.Random
 
 enum class RatingFilter { ALL, WITH_RATING, NO_RATING, TOP, BEST, DANCE }
 
@@ -373,6 +375,7 @@ class MainActivity : ComponentActivity() {
         var position by remember { mutableStateOf(0L) }
         var duration by remember { mutableStateOf(0L) }
         var isLive by remember { mutableStateOf(false) }
+        var showTrackInfoDialog by remember { mutableStateOf(false) }
 
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
@@ -435,6 +438,14 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                             }
+                        }
+                        // Detalii cântec curent
+                        IconButton(onClick = { showTrackInfoDialog = true }) {
+                            Icon(
+                                Icons.Rounded.Info,
+                                contentDescription = "Detalii cântec curent",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
                         }
                         Spacer(modifier = Modifier.weight(1f))
                         // Șterge cântecul curent (local + Nextcloud) și trece la următor
@@ -596,6 +607,18 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Dialog detalii cântec curent
+        if (showTrackInfoDialog) {
+            val currentAudioUrl = playlistItems.getOrNull(currentTrackIndex)?.audioUrl
+            if (currentAudioUrl != null) {
+                TrackInfoDialog(
+                    audioUrl = currentAudioUrl,
+                    songInfo = songInfoByUrl[currentAudioUrl],
+                    onDismiss = { showTrackInfoDialog = false }
+                )
+            }
+        }
+
         // Track info — actualizat la schimbarea piesei
         LaunchedEffect(Unit) {
             player.event.audioItemTransition.collect {
@@ -712,7 +735,9 @@ class MainActivity : ComponentActivity() {
 
     private fun loadAndPlay() {
         lifecycleScope.launch {
-            val items = withContext(Dispatchers.IO) { buildLocalAudioItems() }
+            val (items, freshInfoMap) = withContext(Dispatchers.IO) {
+                buildLocalAudioItems() to PlaylistStore.loadAsMap(this@MainActivity)
+            }
             if (items.isEmpty()) {
                 Toast.makeText(
                     this@MainActivity,
@@ -721,6 +746,8 @@ class MainActivity : ComponentActivity() {
                 ).show()
                 return@launch
             }
+            // Actualizează datele cântecelor din fișier (asigură că detaliile sunt vizibile imediat)
+            if (freshInfoMap.isNotEmpty()) songInfoMap = freshInfoMap
             player.add(items)
             val savedIndex = appSettings.lastTrackIndex.coerceIn(0, items.lastIndex)
             if (savedIndex > 0) player.jumpToItem(savedIndex)
@@ -759,10 +786,22 @@ class MainActivity : ComponentActivity() {
             scanned
         }
 
-        val files = if (playlistMode == PlaylistMode.SHUFFLE)
-            paths.map { File(it) }.shuffled()
-        else
+        val files = if (playlistMode == PlaylistMode.SHUFFLE) {
+            val weightsMap = PlaylistStore.loadWeightsMap(this)
+            val fileList = paths.map { File(it) }
+            if (weightsMap.isEmpty()) {
+                fileList.shuffled()
+            } else {
+                val baseDirPath = audioDir.absolutePath
+                val filesWithWeights = fileList.map { file ->
+                    val id = file.absolutePath.removePrefix(baseDirPath)
+                    file to (weightsMap[id] ?: 1.0)
+                }
+                weightedShuffle(filesWithWeights)
+            }
+        } else {
             paths.map { File(it) }.sortedWith(compareBy({ it.parent }, { it.name }))
+        }
 
         return files.map { file ->
             val folderName = file.parentFile
@@ -776,6 +815,27 @@ class MainActivity : ComponentActivity() {
                 artist = folderName,
             )
         }
+    }
+
+    /**
+     * Shuffle ponderat: cântecele cu greutate mai mare apar mai devreme cu probabilitate mai mare.
+     * Folosește selecție secvențială prin roulette-wheel (suma greutăților rămase).
+     */
+    private fun weightedShuffle(items: List<Pair<File, Double>>): List<File> {
+        val result = mutableListOf<File>()
+        val remaining = items.toMutableList()
+        while (remaining.isNotEmpty()) {
+            val totalWeight = remaining.sumOf { it.second }
+            var r = Random.nextDouble() * totalWeight
+            var selectedIdx = remaining.lastIndex
+            for (i in remaining.indices) {
+                r -= remaining[i].second
+                if (r <= 0.0) { selectedIdx = i; break }
+            }
+            result.add(remaining[selectedIdx].first)
+            remaining.removeAt(selectedIdx)
+        }
+        return result
     }
 
     // Scanează filesystem-ul și returnează căile absolute — folosit doar la refresh
@@ -875,10 +935,13 @@ class MainActivity : ComponentActivity() {
                 onProgress = { state ->
                     syncState = state
                     if (state is SyncState.Done) {
-                        // Rescrie playlist.json cu lista actualizată din folder
+                        // Rescrie playlist.json cu lista actualizată din folder,
+                        // păstrând datele MySQL existente (nu suprascrie cu IDs goale)
                         withContext(Dispatchers.IO) {
                             val paths = scanAudioFiles(localDir)
-                            PlaylistStore.save(this@MainActivity, paths, localDir.absolutePath)
+                            val basePath = localDir.absolutePath
+                            val relIds = paths.map { "/${it.removePrefix("$basePath/")}" }
+                            PlaylistStore.saveEnriched(this@MainActivity, relIds, songInfoMap)
                         }
                         reloadPlayer()
                         Toast.makeText(
@@ -1055,14 +1118,8 @@ fun PlaylistView(
                 val info = songInfoByUrl[item.audioUrl]
                 val duration = info?.optLong("duration", 0L)?.takeIf { it > 0 }
                 val rate = info?.optInt("rate", 0)?.takeIf { it > 0 }
-                val completeness: Float? = run {
-                    val listen = info?.optLong("listen", 0L) ?: 0L
-                    val dur    = info?.optLong("duration", 0L) ?: 0L
-                    val plays  = info?.optInt("plays", 0) ?: 0
-                    if (dur > 0 && plays > 0 && listen > 0)
-                        (listen.toFloat() / (dur.toFloat() * plays)).coerceIn(0f, 1f)
-                    else null
-                }
+                val completeness: Float? = info?.optDouble("completeness", -1.0)
+                    ?.takeIf { it >= 0 }?.toFloat()
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
