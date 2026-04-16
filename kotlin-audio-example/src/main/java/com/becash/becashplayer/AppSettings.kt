@@ -104,8 +104,10 @@ class AppSettings(context: Context) {
         private const val KEY_LOCAL_FOLDER     = "local_folder"
         private const val KEY_LAST_TRACK_INDEX = "last_track_index"
         private const val KEY_LAST_PLAYLIST    = "last_playlist_mode"
-        private const val KEY_FILTER_QUERY     = "filter_query"
-        private const val KEY_FILTER_INVERTED  = "filter_inverted"
+        private const val KEY_FILTER_QUERY        = "filter_query"
+        private const val KEY_FILTER_INVERTED    = "filter_inverted"
+        private const val KEY_LAST_RATING_FILTER = "last_rating_filter"
+        private const val KEY_LAST_SONG_URL      = "last_song_url"
         private const val KEY_MYSQL_HOST       = "mysql_host"
         private const val KEY_MYSQL_PORT       = "mysql_port"
         private const val KEY_MYSQL_USER       = "mysql_user"
@@ -125,6 +127,8 @@ class AppSettings(context: Context) {
         private const val DEFAULT_MYSQL_PORT      = 3306
         private const val DEFAULT_MYSQL_USER      = ""
         private const val DEFAULT_MYSQL_PASSWORD  = ""
+        private const val DEFAULT_LAST_PLAYLIST     = "SHUFFLE"
+        private const val DEFAULT_LAST_RATING_FILTER = "ALL"
         private const val DEFAULT_MYSQL_DB        = "becash_player"
     }
 }
