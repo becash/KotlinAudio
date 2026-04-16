@@ -9,6 +9,24 @@ object PlaylistStore {
 
     private const val FILE_NAME = "playlist.json"
 
+    /** Returnează map: id ("/883/song.mp3") → JSONObject cu datele MySQL */
+    fun loadAsMap(context: Context): Map<String, JSONObject> {
+        val file = File(context.getExternalFilesDir(null), FILE_NAME)
+        if (!file.exists()) return emptyMap()
+        return try {
+            val arr = JSONArray(file.readText())
+            val result = mutableMapOf<String, JSONObject>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val id = obj.optString("id").takeIf { it.isNotBlank() } ?: continue
+                result[id] = obj
+            }
+            result
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
     fun load(context: Context, baseDir: String = ""): List<String> {
         val file = File(context.getExternalFilesDir(null), FILE_NAME)
         if (!file.exists()) return emptyList()

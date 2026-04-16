@@ -260,7 +260,7 @@ class MainActivity : ComponentActivity() {
         }
 
         // Încarcă cache-ul MySQL local
-        songInfoMap = SongInfoStore.load(this)
+        songInfoMap = PlaylistStore.loadAsMap(this)
 
         if (hasStoragePermission()) {
             loadAndPlay()
@@ -831,12 +831,11 @@ class MainActivity : ComponentActivity() {
                     database = appSettings.mysqlDatabase,
                 )
                 withContext(Dispatchers.IO) {
-                    SongInfoStore.save(this@MainActivity, result)
                     // Actualizează playlist.json cu datele din MySQL (mapping după id)
                     val playlistIds = PlaylistStore.load(this@MainActivity)
                     PlaylistStore.saveEnriched(this@MainActivity, playlistIds, result)
                 }
-                songInfoMap = result
+                songInfoMap = PlaylistStore.loadAsMap(this@MainActivity)
                 Toast.makeText(
                     this@MainActivity,
                     "MySQL: ${result.size} cântece sincronizate.",
