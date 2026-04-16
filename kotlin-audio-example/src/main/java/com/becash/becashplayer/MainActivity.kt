@@ -250,6 +250,11 @@ class MainActivity : ComponentActivity() {
         }
         filterQuery    = appSettings.filterQuery
         filterInverted = appSettings.filterInverted
+        ratingFilter   = try {
+            RatingFilter.valueOf(appSettings.lastRatingFilter)
+        } catch (_: Exception) {
+            RatingFilter.ALL
+        }
 
         // Player inițializat pe main thread — obligatoriu pentru ExoPlayer
         player = QueuedAudioPlayer(
@@ -571,7 +576,10 @@ class MainActivity : ComponentActivity() {
                                             else MaterialTheme.colorScheme.surfaceVariant,
                                     shape = MaterialTheme.shapes.medium
                                 )
-                                .clickable { ratingFilter = if (active) RatingFilter.ALL else filter }
+                                .clickable {
+                                    ratingFilter = if (active) RatingFilter.ALL else filter
+                                    appSettings.lastRatingFilter = ratingFilter.name
+                                }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             contentAlignment = Alignment.Center
                         ) {
@@ -686,8 +694,10 @@ class MainActivity : ComponentActivity() {
     // -------------------------------------------------------------------------
     override fun onStop() {
         super.onStop()
-        appSettings.lastTrackIndex   = player.currentIndex
-        appSettings.lastPlaylistMode = playlistMode.name
+        appSettings.lastTrackIndex    = player.currentIndex
+        appSettings.lastPlaylistMode  = playlistMode.name
+        appSettings.lastRatingFilter  = ratingFilter.name
+        player.currentItem?.audioUrl?.let { appSettings.lastSongUrl = it }
     }
 
     // -------------------------------------------------------------------------
@@ -749,7 +759,12 @@ class MainActivity : ComponentActivity() {
             // Actualizează datele cântecelor din fișier (asigură că detaliile sunt vizibile imediat)
             if (freshInfoMap.isNotEmpty()) songInfoMap = freshInfoMap
             player.add(items)
-            val savedIndex = appSettings.lastTrackIndex.coerceIn(0, items.lastIndex)
+            val savedUrl = appSettings.lastSongUrl
+            val savedIndex = if (savedUrl.isNotBlank())
+                items.indexOfFirst { it.audioUrl == savedUrl }.takeIf { it >= 0 }
+                    ?: appSettings.lastTrackIndex.coerceIn(0, items.lastIndex)
+            else
+                appSettings.lastTrackIndex.coerceIn(0, items.lastIndex)
             if (savedIndex > 0) player.jumpToItem(savedIndex)
             player.play()
             playlistItems = player.items
