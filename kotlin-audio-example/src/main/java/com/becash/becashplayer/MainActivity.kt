@@ -69,6 +69,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import android.content.Context
 import android.view.WindowManager
 import androidx.compose.ui.platform.LocalConfiguration
@@ -1051,7 +1052,17 @@ fun PlaylistView(
                 val rowNumber = listPos + 1
                 val itemColor = if (isPlaying) MaterialTheme.colorScheme.onPrimaryContainer
                                 else MaterialTheme.colorScheme.onSurfaceVariant
-                val duration = songInfoByUrl[item.audioUrl]?.optLong("duration", 0L)?.takeIf { it > 0 }
+                val info = songInfoByUrl[item.audioUrl]
+                val duration = info?.optLong("duration", 0L)?.takeIf { it > 0 }
+                val rate = info?.optInt("rate", 0)?.takeIf { it > 0 }
+                val completeness: Float? = run {
+                    val listen = info?.optLong("listen", 0L) ?: 0L
+                    val dur    = info?.optLong("duration", 0L) ?: 0L
+                    val plays  = info?.optInt("plays", 0) ?: 0
+                    if (dur > 0 && plays > 0 && listen > 0)
+                        (listen.toFloat() / (dur.toFloat() * plays)).coerceIn(0f, 1f)
+                    else null
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1086,13 +1097,44 @@ fun PlaylistView(
                             maxLines = 1
                         )
                     }
-                    if (duration != null) {
-                        Text(
-                            text = duration.millisecondsToString(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = itemColor,
-                            modifier = Modifier.padding(start = 8.dp)
-                        )
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        modifier = Modifier.padding(start = 8.dp)
+                    ) {
+                        if (duration != null) {
+                            Text(
+                                text = duration.millisecondsToString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = itemColor,
+                            )
+                        }
+                        if (rate != null || completeness != null) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(top = 2.dp)
+                            ) {
+                                if (rate != null) {
+                                    Text(
+                                        text = "$rate",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = itemColor,
+                                        modifier = Modifier.padding(end = 3.dp)
+                                    )
+                                }
+                                if (completeness != null) {
+                                    LinearProgressIndicator(
+                                        progress = completeness,
+                                        modifier = Modifier.width(40.dp),
+                                        color = when {
+                                            completeness >= 0.7f -> MaterialTheme.colorScheme.primary
+                                            completeness >= 0.4f -> MaterialTheme.colorScheme.tertiary
+                                            else                 -> MaterialTheme.colorScheme.error
+                                        },
+                                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
