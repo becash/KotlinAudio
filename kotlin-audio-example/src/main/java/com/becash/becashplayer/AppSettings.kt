@@ -70,6 +70,14 @@ class AppSettings(context: Context) {
         get() = data.optBoolean(KEY_FILTER_INVERTED, false)
         set(v) { data.put(KEY_FILTER_INVERTED, v); save() }
 
+    var lastRatingFilter: String
+        get() = data.optString(KEY_LAST_RATING_FILTER, DEFAULT_LAST_RATING_FILTER)
+        set(v) { data.put(KEY_LAST_RATING_FILTER, v); save() }
+
+    var lastSongUrl: String
+        get() = data.optString(KEY_LAST_SONG_URL, "")
+        set(v) { data.put(KEY_LAST_SONG_URL, v); save() }
+
     var mysqlHost: String
         get() = data.optString(KEY_MYSQL_HOST, DEFAULT_MYSQL_HOST)
         set(v) { data.put(KEY_MYSQL_HOST, v); save() }
