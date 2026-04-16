@@ -33,12 +33,11 @@ object DbSync {
                         dance    TINYINT(1) DEFAULT 0,
                         listen   BIGINT     DEFAULT 0,
                         duration INT        DEFAULT 0,
-                        deleted  TINYINT(1) DEFAULT 0,
                         updated  DATETIME   DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """.trimIndent())
 
-                stmt.executeQuery("SELECT * FROM played WHERE deleted = 0").use { rs ->
+                stmt.executeQuery("SELECT * FROM played").use { rs ->
                     val meta = rs.metaData
                     val result = mutableMapOf<String, JSONObject>()
                     while (rs.next()) {
@@ -54,5 +53,56 @@ object DbSync {
                 }
             }
         }
+    }
+
+    suspend fun incrementPlays(
+        host: String,
+        port: Int,
+        user: String,
+        password: String,
+        database: String,
+        songId: String,
+    ) = withContext(Dispatchers.IO) {
+        Class.forName("com.mysql.jdbc.Driver")
+        val url = "jdbc:mysql://$host:$port/$database" +
+                "?useSSL=false&connectTimeout=5000&socketTimeout=10000" +
+                "&useUnicode=true&characterEncoding=UTF-8"
+        DriverManager.getConnection(url, user, password).use { conn ->
+            conn.prepareStatement(
+                "INSERT INTO played (id, plays) VALUES (?, 1) ON DUPLICATE KEY UPDATE plays = plays + 1"
+            ).use { ps ->
+                ps.setString(1, songId)
+                ps.executeUpdate()
+            }
+        }
+        Timber.i("DbSync: plays++ pentru $songId")
+    }
+
+    suspend fun addListen(
+        host: String,
+        port: Int,
+        user: String,
+        password: String,
+        database: String,
+        songId: String,
+        milliseconds: Long,
+        duration: Long,
+    ) = withContext(Dispatchers.IO) {
+        Class.forName("com.mysql.jdbc.Driver")
+        val url = "jdbc:mysql://$host:$port/$database" +
+                "?useSSL=false&connectTimeout=5000&socketTimeout=10000" +
+                "&useUnicode=true&characterEncoding=UTF-8"
+        DriverManager.getConnection(url, user, password).use { conn ->
+            conn.prepareStatement(
+                "INSERT INTO played (id, listen, duration) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE listen = listen + ?, duration = IF(duration = 0, VALUES(duration), duration)"
+            ).use { ps ->
+                ps.setString(1, songId)
+                ps.setLong(2, milliseconds)
+                ps.setLong(3, duration)
+                ps.setLong(4, milliseconds)
+                ps.executeUpdate()
+            }
+        }
+        Timber.i("DbSync: listen += ${milliseconds}ms pentru $songId")
     }
 }

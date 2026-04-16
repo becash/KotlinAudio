@@ -133,6 +133,12 @@ class MainActivity : ComponentActivity() {
     private var isDbSyncBusy by mutableStateOf(false)
     private var ratingFilter by mutableStateOf(RatingFilter.ALL)
 
+    // Urmărire timp ascultat per cântec
+    private var listenSongId: String? = null
+    private var listenDuration = 0L       // durata cântecului curent în ms
+    private var listenStartTime = 0L      // System.currentTimeMillis() când a pornit redarea
+    private var listenAccumulatedMs = 0L  // ms acumulați în pauze
+
     private val audioBaseDir: String
         get() = File(Environment.getExternalStorageDirectory(), appSettings.localFolderName).absolutePath
 
@@ -278,6 +284,24 @@ class MainActivity : ComponentActivity() {
             .onEach { error ->
                 Timber.e("Eroare redare (${error.code}): ${error.message} — se trece la piesa următoare")
                 player.next()
+            }
+            .launchIn(lifecycleScope)
+
+        // Cronometru listen — pornit la PLAYING, oprit la PAUSED
+        player.event.stateChange
+            .onEach { state ->
+                when (state) {
+                    AudioPlayerState.PLAYING -> {
+                        if (listenStartTime == 0L) listenStartTime = System.currentTimeMillis()
+                    }
+                    AudioPlayerState.PAUSED -> {
+                        if (listenStartTime != 0L) {
+                            listenAccumulatedMs += System.currentTimeMillis() - listenStartTime
+                            listenStartTime = 0L
+                        }
+                    }
+                    else -> {}
+                }
             }
             .launchIn(lifecycleScope)
 
@@ -574,6 +598,12 @@ class MainActivity : ComponentActivity() {
         // Track info — actualizat la schimbarea piesei
         LaunchedEffect(Unit) {
             player.event.audioItemTransition.collect {
+                // Salvează milisecundele ascultate pentru cântecul anterior
+                flushListen()
+                listenSongId = player.currentItem?.audioUrl
+                    ?.removePrefix("file://$audioBaseDir")
+                    ?.let { if (it.startsWith("/")) it else "/$it" }
+
                 val newIndex = player.currentIndex
                 // Dacă filtrul e activ și piesa nouă nu e în lista filtrată, sari la următoarea filtrată
                 val fi = filteredIndices
@@ -590,6 +620,27 @@ class MainActivity : ComponentActivity() {
                 isLive = player.isCurrentMediaItemLive
                 currentTrackIndex = newIndex
                 playlistItems = player.items
+
+                // Incrementează plays în MySQL
+                val songId = player.currentItem?.audioUrl
+                    ?.removePrefix("file://$audioBaseDir")
+                    ?.let { if (it.startsWith("/")) it else "/$it" }
+                if (songId != null && appSettings.mysqlHost.isNotBlank()) {
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        try {
+                            DbSync.incrementPlays(
+                                host = appSettings.mysqlHost,
+                                port = appSettings.mysqlPort,
+                                user = appSettings.mysqlUser,
+                                password = appSettings.mysqlPassword,
+                                database = appSettings.mysqlDatabase,
+                                songId = songId,
+                            )
+                        } catch (e: Exception) {
+                            Timber.e(e, "incrementPlays error")
+                        }
+                    }
+                }
             }
         }
 
@@ -600,6 +651,8 @@ class MainActivity : ComponentActivity() {
                 position = player.position
                 duration = player.duration
                 isLive = player.isCurrentMediaItemLive
+                // Capturează durata imediat ce playerul o cunoaște (la tranziție era 0)
+                if (listenDuration == 0L && duration > 0L) listenDuration = duration
             }
         }
     }
@@ -732,6 +785,36 @@ class MainActivity : ComponentActivity() {
             .sortedWith(compareBy({ it.parent }, { it.name }))
             .map { it.absolutePath }
             .toList()
+    }
+
+    private fun flushListen() {
+        if (listenStartTime != 0L) {
+            listenAccumulatedMs += System.currentTimeMillis() - listenStartTime
+            listenStartTime = 0L
+        }
+        val songId = listenSongId ?: return
+        val ms = listenAccumulatedMs
+        val dur = listenDuration
+        listenAccumulatedMs = 0L
+        listenDuration = 0L
+        listenSongId = null
+        if (ms <= 0 || appSettings.mysqlHost.isBlank()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                DbSync.addListen(
+                    host = appSettings.mysqlHost,
+                    port = appSettings.mysqlPort,
+                    user = appSettings.mysqlUser,
+                    password = appSettings.mysqlPassword,
+                    database = appSettings.mysqlDatabase,
+                    songId = songId,
+                    milliseconds = ms,
+                    duration = dur,
+                )
+            } catch (e: Exception) {
+                Timber.e(e, "addListen error")
+            }
+        }
     }
 
     private fun handleExternalAction(action: MediaSessionCallback) {
