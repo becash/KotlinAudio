@@ -121,8 +121,8 @@ class AppSettings(context: Context) {
         private const val KEY_MYSQL_USER       = "mysql_user"
         private const val KEY_MYSQL_PASSWORD   = "mysql_password"
         private const val KEY_MYSQL_DB         = "mysql_db"
-        const val BARIERA9  = ""   // numărul barierei 9
-        const val BARIERA10 = ""   // numărul barierei 10
+        const val BARIERA9  = "060625421"   // numărul barierei 9
+        const val BARIERA10 = "060625723"   // numărul barierei 10
 
         private const val DEFAULT_SERVER_URL      = ""
         private const val DEFAULT_USERNAME        = ""

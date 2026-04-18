@@ -44,8 +44,11 @@ import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.SelfImprovement
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -105,7 +108,18 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
-enum class RatingFilter { ALL, WITH_RATING, NO_RATING, TOP, BEST, DANCE }
+enum class RatingFilter {
+    ALL, WITH_RATING, NO_RATING, TOP, BEST, DANCE, CALM;
+    val label get() = when (this) {
+        ALL         -> "Toate"
+        WITH_RATING -> "Cu apreciere"
+        NO_RATING   -> "Fără apreciere"
+        TOP         -> "Top"
+        BEST        -> "Cele mai bune"
+        DANCE       -> "Dans"
+        CALM        -> "Liniștit"
+    }
+}
 
 enum class PlaylistMode {
     SHUFFLE, NORMAL, PLAY_ONE;
@@ -180,6 +194,7 @@ class MainActivity : ComponentActivity() {
                         RatingFilter.TOP         -> rate >= 4
                         RatingFilter.BEST        -> rate == 5
                         RatingFilter.DANCE       -> dance
+                        RatingFilter.CALM        -> rate == 2
                         RatingFilter.ALL         -> true
                     }
                 }
@@ -230,6 +245,18 @@ class MainActivity : ComponentActivity() {
         } else {
             Toast.makeText(this, "Permisiunea de stocare este necesară.", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private var pendingCallNumber: String? = null
+    private val callPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            pendingCallNumber?.let { startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:$it"))) }
+        } else {
+            Toast.makeText(this, "Permisiunea de apel este necesară.", Toast.LENGTH_LONG).show()
+        }
+        pendingCallNumber = null
     }
 
     // -------------------------------------------------------------------------
@@ -444,6 +471,55 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
+                        // Meniu playlist activ
+                        val playlistFilters = remember {
+                            listOf(
+                                RatingFilter.NO_RATING   to Icons.Rounded.StarBorder,
+                                RatingFilter.WITH_RATING to Icons.Rounded.Star,
+                                RatingFilter.TOP         to Icons.Rounded.Person,
+                                RatingFilter.BEST        to Icons.Rounded.Public,
+                                RatingFilter.DANCE       to Icons.Rounded.EmojiPeople,
+                                RatingFilter.CALM        to Icons.Rounded.SelfImprovement,
+                            )
+                        }
+                        val activePlaylistIcon = playlistFilters.firstOrNull { it.first == ratingFilter }?.second
+                        var playlistMenuExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { playlistMenuExpanded = true }) {
+                                Icon(
+                                    imageVector = activePlaylistIcon ?: Icons.Rounded.QueueMusic,
+                                    contentDescription = "Playlist",
+                                    tint = if (ratingFilter != RatingFilter.ALL)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = playlistMenuExpanded,
+                                onDismissRequest = { playlistMenuExpanded = false }
+                            ) {
+                                playlistFilters.forEach { (filter, icon) ->
+                                    val active = ratingFilter == filter
+                                    DropdownMenuItem(
+                                        text = { Text(filter.label) },
+                                        leadingIcon = {
+                                            Icon(
+                                                icon,
+                                                contentDescription = null,
+                                                tint = if (active) MaterialTheme.colorScheme.primary
+                                                       else LocalContentColor.current
+                                            )
+                                        },
+                                        onClick = {
+                                            playlistMenuExpanded = false
+                                            ratingFilter = if (active) RatingFilter.ALL else filter
+                                            appSettings.lastRatingFilter = ratingFilter.name
+                                        }
+                                    )
+                                }
+                            }
+                        }
                         // Detalii cântec curent
                         IconButton(onClick = { showTrackInfoDialog = true }) {
                             Icon(
@@ -479,6 +555,7 @@ class MainActivity : ComponentActivity() {
                                 RatingFilter.TOP         -> rate >= 4
                                 RatingFilter.BEST        -> rate == 5
                                 RatingFilter.DANCE       -> dance
+                                RatingFilter.CALM        -> rate == 2
                                 RatingFilter.ALL         -> true
                             }
                             if (passes) idx else null
@@ -547,46 +624,6 @@ class MainActivity : ComponentActivity() {
                                 imageVector = if (filterInverted) Icons.Rounded.FilterListOff else Icons.Rounded.FilterList,
                                 contentDescription = null,
                                 tint = if (filterInverted) MaterialTheme.colorScheme.primary
-                                       else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                // Lista playlisturilor (chipuri rating) — mereu vizibilă
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    listOf(
-                        RatingFilter.NO_RATING   to Icons.Rounded.StarBorder,
-                        RatingFilter.WITH_RATING to Icons.Rounded.Star,
-                        RatingFilter.TOP         to Icons.Rounded.Person,
-                        RatingFilter.BEST        to Icons.Rounded.Public,
-                        RatingFilter.DANCE       to Icons.Rounded.EmojiPeople,
-                    ).forEach { (filter, icon) ->
-                        val active = ratingFilter == filter
-                        Box(
-                            modifier = Modifier
-                                .background(
-                                    color = if (active) MaterialTheme.colorScheme.primaryContainer
-                                            else MaterialTheme.colorScheme.surfaceVariant,
-                                    shape = MaterialTheme.shapes.medium
-                                )
-                                .clickable {
-                                    ratingFilter = if (active) RatingFilter.ALL else filter
-                                    appSettings.lastRatingFilter = ratingFilter.name
-                                }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                icon,
-                                contentDescription = null,
-                                tint = if (active) MaterialTheme.colorScheme.onPrimaryContainer
                                        else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -1014,8 +1051,12 @@ class MainActivity : ComponentActivity() {
 
     private fun callPhone(number: String) {
         if (number.isBlank()) return
-        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number"))
-        startActivity(intent)
+        if (checkSelfPermission(Manifest.permission.CALL_PHONE) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:$number")))
+        } else {
+            pendingCallNumber = number
+            callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+        }
     }
 
     private fun hasStoragePermission(): Boolean =
