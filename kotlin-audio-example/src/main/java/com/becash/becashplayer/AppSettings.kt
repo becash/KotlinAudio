@@ -135,7 +135,6 @@ class AppSettings(context: Context) {
         private const val DEFAULT_MYSQL_PORT      = 3306
         private const val DEFAULT_MYSQL_USER      = ""
         private const val DEFAULT_MYSQL_PASSWORD  = ""
-        private const val DEFAULT_LAST_PLAYLIST     = "SHUFFLE"
         private const val DEFAULT_LAST_RATING_FILTER = "ALL"
         private const val DEFAULT_MYSQL_DB        = "becash_player"
     }

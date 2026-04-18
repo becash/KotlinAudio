@@ -47,6 +47,12 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.SelfImprovement
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.DropdownMenuItem
@@ -114,8 +120,8 @@ enum class RatingFilter {
         ALL         -> "Toate"
         WITH_RATING -> "Cu apreciere"
         NO_RATING   -> "Fără apreciere"
-        TOP         -> "Top"
-        BEST        -> "Cele mai bune"
+        TOP         -> "Top personal"
+        BEST        -> "Top public"
         DANCE       -> "Dans"
         CALM        -> "Liniștit"
     }
@@ -194,7 +200,7 @@ class MainActivity : ComponentActivity() {
                         RatingFilter.TOP         -> rate >= 4
                         RatingFilter.BEST        -> rate == 5
                         RatingFilter.DANCE       -> dance
-                        RatingFilter.CALM        -> rate == 2
+                        RatingFilter.CALM        -> songInfoMap[relPath]?.opt("calm").let { it == true || it == 1 || it?.toString() == "1" }
                         RatingFilter.ALL         -> true
                     }
                 }
@@ -408,6 +414,14 @@ class MainActivity : ComponentActivity() {
         var duration by remember { mutableStateOf(0L) }
         var isLive by remember { mutableStateOf(false) }
         var showTrackInfoDialog by remember { mutableStateOf(false) }
+        var showRateDanceDialog by remember { mutableStateOf(false) }
+        val currentRelPath = remember(currentTrackIndex, playlistItems) {
+            playlistItems.getOrNull(currentTrackIndex)?.audioUrl
+                ?.removePrefix("file://$audioBaseDir")
+        }
+        val currentSongId = remember(currentRelPath) {
+            currentRelPath?.let { if (it.startsWith("/")) it else "/$it" }
+        }
 
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
@@ -520,6 +534,19 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
+                        // Apreciere și dans — cântec curent
+                        val currentInfo = currentRelPath?.let { songInfoMap[it] }
+                        val hasRateOrDance = (currentInfo?.optInt("rate", 0) ?: 0) > 0 ||
+                            currentInfo?.opt("dance").let { it == true || it == 1 || it?.toString() == "1" } ||
+                            currentInfo?.opt("calm").let  { it == true || it == 1 || it?.toString() == "1" }
+                        IconButton(onClick = { showRateDanceDialog = true }) {
+                            Icon(
+                                Icons.Rounded.Tune,
+                                contentDescription = "Apreciere și dans",
+                                tint = if (hasRateOrDance) MaterialTheme.colorScheme.primary
+                                       else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                         // Detalii cântec curent
                         IconButton(onClick = { showTrackInfoDialog = true }) {
                             Icon(
@@ -539,6 +566,72 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                // Dialog apreciere și dans
+                if (showRateDanceDialog && currentRelPath != null && currentSongId != null) {
+                    val info = songInfoMap[currentRelPath]
+                    val rate = info?.optInt("rate", 0) ?: 0
+                    val dance = info?.opt("dance").let { it == true || it == 1 || it?.toString() == "1" }
+                    val calm  = info?.opt("calm").let  { it == true || it == 1 || it?.toString() == "1" }
+                    AlertDialog(
+                        onDismissRequest = { showRateDanceDialog = false },
+                        title = { Text("Apreciere — cântec curent") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                listOf(
+                                    0 to "Fără apreciere",
+                                    1 to "1",
+                                    2 to "2",
+                                    3 to "3",
+                                    4 to "4 — Top personal",
+                                    5 to "5 — Top public",
+                                ).forEach { (value, label) ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .selectable(
+                                                selected = rate == value,
+                                                onClick = { updateRateDance(currentSongId, currentRelPath, value, dance, calm) }
+                                            )
+                                            .padding(vertical = 2.dp)
+                                    ) {
+                                        RadioButton(selected = rate == value, onClick = null)
+                                        Text(label, modifier = Modifier.padding(start = 8.dp))
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 2.dp)
+                                ) {
+                                    Checkbox(
+                                        checked = dance,
+                                        onCheckedChange = { updateRateDance(currentSongId, currentRelPath, rate, it, calm) }
+                                    )
+                                    Text("Muzică dans", modifier = Modifier.padding(start = 8.dp))
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 2.dp)
+                                ) {
+                                    Checkbox(
+                                        checked = calm,
+                                        onCheckedChange = { updateRateDance(currentSongId, currentRelPath, rate, dance, it) }
+                                    )
+                                    Text("Liniștit", modifier = Modifier.padding(start = 8.dp))
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showRateDanceDialog = false }) { Text("Închide") }
+                        }
+                    )
+                }
+
                 // Playlist — se întinde ocupând tot spațiul disponibil
                 // Indecșii playerului care trec filtrul de rating
                 val ratingFilterSet = remember(ratingFilter, songInfoMap, playlistItems) {
@@ -555,7 +648,7 @@ class MainActivity : ComponentActivity() {
                                 RatingFilter.TOP         -> rate >= 4
                                 RatingFilter.BEST        -> rate == 5
                                 RatingFilter.DANCE       -> dance
-                                RatingFilter.CALM        -> rate == 2
+                                RatingFilter.CALM        -> songInfoMap[relPath]?.opt("calm").let { it == true || it == 1 || it?.toString() == "1" }
                                 RatingFilter.ALL         -> true
                             }
                             if (passes) idx else null
@@ -1056,6 +1149,34 @@ class MainActivity : ComponentActivity() {
         } else {
             pendingCallNumber = number
             callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+        }
+    }
+
+    private fun updateRateDance(songId: String, relPath: String, rate: Int, dance: Boolean, calm: Boolean) {
+        val updated = (songInfoMap[relPath]?.let { JSONObject(it.toString()) } ?: JSONObject()).apply {
+            put("rate", rate)
+            put("dance", if (dance) 1 else 0)
+            put("calm", if (calm) 1 else 0)
+        }
+        songInfoMap = songInfoMap + (relPath to updated)
+        if (appSettings.mysqlHost.isNotBlank()) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    DbSync.setRateDance(
+                        host = appSettings.mysqlHost,
+                        port = appSettings.mysqlPort,
+                        user = appSettings.mysqlUser,
+                        password = appSettings.mysqlPassword,
+                        database = appSettings.mysqlDatabase,
+                        songId = songId,
+                        rate = rate,
+                        dance = dance,
+                        calm = calm,
+                    )
+                } catch (e: Exception) {
+                    Timber.e(e, "setRateDance error")
+                }
+            }
         }
     }
 

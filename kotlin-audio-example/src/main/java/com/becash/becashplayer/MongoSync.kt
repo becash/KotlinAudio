@@ -31,6 +31,7 @@ object DbSync {
                         plays    INT        DEFAULT 0,
                         rate     TINYINT    DEFAULT 0,
                         dance    TINYINT(1) DEFAULT 0,
+                        calm     TINYINT(1) DEFAULT 0,
                         listen   BIGINT     DEFAULT 0,
                         duration INT        DEFAULT 0,
                         updated  DATETIME   DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -104,5 +105,37 @@ object DbSync {
             }
         }
         Timber.i("DbSync: listen += ${milliseconds}ms pentru $songId")
+    }
+
+    suspend fun setRateDance(
+        host: String,
+        port: Int,
+        user: String,
+        password: String,
+        database: String,
+        songId: String,
+        rate: Int,
+        dance: Boolean,
+        calm: Boolean,
+    ) = withContext(Dispatchers.IO) {
+        Class.forName("com.mysql.jdbc.Driver")
+        val url = "jdbc:mysql://$host:$port/$database" +
+                "?useSSL=false&connectTimeout=5000&socketTimeout=10000" +
+                "&useUnicode=true&characterEncoding=UTF-8"
+        DriverManager.getConnection(url, user, password).use { conn ->
+            conn.prepareStatement(
+                "INSERT INTO played (id, rate, dance, calm) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE rate = ?, dance = ?, calm = ?"
+            ).use { ps ->
+                ps.setString(1, songId)
+                ps.setInt(2, rate)
+                ps.setInt(3, if (dance) 1 else 0)
+                ps.setInt(4, if (calm) 1 else 0)
+                ps.setInt(5, rate)
+                ps.setInt(6, if (dance) 1 else 0)
+                ps.setInt(7, if (calm) 1 else 0)
+                ps.executeUpdate()
+            }
+        }
+        Timber.i("DbSync: rate=$rate dance=$dance calm=$calm pentru $songId")
     }
 }
