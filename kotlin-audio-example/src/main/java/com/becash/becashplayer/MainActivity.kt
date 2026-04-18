@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.SelfImprovement
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.LooksTwo
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -115,7 +116,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
 enum class RatingFilter {
-    ALL, WITH_RATING, NO_RATING, TOP, BEST, DANCE, CALM;
+    ALL, WITH_RATING, NO_RATING, TOP, BEST, DANCE, CALM, RATE2;
     val label get() = when (this) {
         ALL         -> "Toate"
         WITH_RATING -> "Cu apreciere"
@@ -124,6 +125,7 @@ enum class RatingFilter {
         BEST        -> "Top public"
         DANCE       -> "Dans"
         CALM        -> "Liniștit"
+        RATE2       -> "Apreciere 2"
     }
 }
 
@@ -201,6 +203,7 @@ class MainActivity : ComponentActivity() {
                         RatingFilter.BEST        -> rate == 5
                         RatingFilter.DANCE       -> dance
                         RatingFilter.CALM        -> songInfoMap[relPath]?.opt("calm").let { it == true || it == 1 || it?.toString() == "1" }
+                        RatingFilter.RATE2       -> rate == 2
                         RatingFilter.ALL         -> true
                     }
                 }
@@ -494,6 +497,7 @@ class MainActivity : ComponentActivity() {
                                 RatingFilter.BEST        to Icons.Rounded.Public,
                                 RatingFilter.DANCE       to Icons.Rounded.EmojiPeople,
                                 RatingFilter.CALM        to Icons.Rounded.SelfImprovement,
+                                RatingFilter.RATE2       to Icons.Rounded.LooksTwo,
                             )
                         }
                         val activePlaylistIcon = playlistFilters.firstOrNull { it.first == ratingFilter }?.second
@@ -649,6 +653,7 @@ class MainActivity : ComponentActivity() {
                                 RatingFilter.BEST        -> rate == 5
                                 RatingFilter.DANCE       -> dance
                                 RatingFilter.CALM        -> songInfoMap[relPath]?.opt("calm").let { it == true || it == 1 || it?.toString() == "1" }
+                                RatingFilter.RATE2       -> rate == 2
                                 RatingFilter.ALL         -> true
                             }
                             if (passes) idx else null
