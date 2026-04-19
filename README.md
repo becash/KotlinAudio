@@ -1,96 +1,251 @@
-# KotlinAudio
+# BecashPlayer
 
-[![](https://jitpack.io/v/doublesymmetry/KotlinAudio.svg)](https://jitpack.io/#doublesymmetry/KotlinAudio)
+> **Fork of [doublesymmetry/KotlinAudio](https://github.com/doublesymmetry/KotlinAudio)** — the
+> `kotlin-audio` library module is kept as-is; the `kotlin-audio-example` module has been fully
+> replaced with a personal music player application.
 
-KotlinAudio is an Android audio player written in Kotlin, making it simpler to work with audio playback from streams and files.
+A personal Android music player built with Kotlin and Jetpack Compose, powered by
+the [KotlinAudio](https://github.com/doublesymmetry/KotlinAudio) / Media3 library. Designed for
+syncing and playing a private music library stored on a Nextcloud (WebDAV) server, with per-track
+metadata (ratings, play counts, listen time) tracked in a MySQL database.
 
-Inspired by [SwiftAudioEx](https://github.com/doublesymmetry/SwiftAudioEx). Our aim is to have feature parity with the iOS equivalent.
+---
 
-<div align="left" valign="middle">
-<a href="https://runblaze.dev">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://www.runblaze.dev/logo_dark.png">
-   <img align="right" src="https://www.runblaze.dev/logo_light.png" height="102px"/>
- </picture>
-</a>
+## Features
 
-<br style="display: none;"/>
+### Playback
 
-_[Blaze](https://runblaze.dev) sponsors KotlinAudio by providing super fast Apple Silicon based macOS Github Action Runners. Use the discount code `RNTP50` at checkout to get 50% off your first year._
+- Plays local audio files: `mp3`, `flac`, `aac`, `ogg`, `m4a`, `wav`, `wma`, `opus`
+- Three playlist modes: **Shuffle**, **Normal**, **Play One** (repeat single)
+- Previous / Next navigation with filter awareness
+- Persistent playback state — resumes last track and position on restart
+- Media session integration: lock-screen controls, headset buttons, Bluetooth
 
-</div>
+### Sync
 
-## Example
+- **WebDAV sync** — downloads new/updated files from a Nextcloud server, skips unchanged files,
+  retries on failure (3×)
+- **MySQL sync** — reads track metadata (ratings, play counts) from a shared database; uploads
+  accumulated listen time and play events
 
-To see the audio player in action, run the example project!
-To run the example project, clone the repo, then open in Android Studio.
-Choose "kotlin-audio-example" in the run target and run it in a simulator
-(or on an actual device).
+### Weighted Shuffle
+
+Tracks played rarely are scheduled more often. The weight formula:
+
+- Unplayed tracks get maximum priority (`weight = 1000 × (max_plays + 1)`)
+- Played tracks: `weight = 1000 × max_plays / plays`
+- Weight doubles for each month since the track was last played (up to 12 months)
+
+### Rating & Filtering
+
+- Per-track flags: **Rate** (1–5 stars), **Dance**, **Calm**
+- Filter presets: `ALL`, `WITH_RATING`, `NO_RATING`, `TOP` (≥4), `BEST` (5), `DANCE`, `CALM`,
+  `RATE2` (rated but ≤2)
+- Full-text search across artist and title, with optional **inverted** mode (exclude matches)
+
+### UI
+
+- Jetpack Compose / Material 3
+- Scrollable track list with real-time position indicator
+- Track info dialog: view and edit rating/dance/calm flags
+- Settings screen: configure server URL, credentials, folder paths, MySQL connection
+- Sync progress bar with file-level status
+- Screen stays on during playback
+
+### Other
+
+- Crash reporting via [Sentry](https://sentry.io)
+- Call-phone shortcut (configured numbers, e.g. gate intercoms)
+- All credentials stored in `local.properties` — never committed to version control
+
+---
+
+## Architecture
+
+```
+KotlinAudio/
+├── kotlin-audio/               # Media3/ExoPlayer wrapper library
+│   └── src/main/java/com/doublesymmetry/kotlinaudio/
+│       ├── players/            # BaseAudioPlayer, QueuedAudioPlayer
+│       ├── models/             # AudioItem, PlayerConfig, BufferConfig, …
+│       ├── event/              # Kotlin Flow event holders
+│       └── notification/       # Media session & notification manager
+│
+└── kotlin-audio-example/       # BecashPlayer application
+    └── src/main/java/com/becash/becashplayer/
+        ├── MainActivity.kt     # Compose UI entry point
+        ├── PlayerViewModel.kt  # MVVM state + business logic
+        ├── AppSettings.kt      # JSON-backed persistent settings
+        ├── PlaylistStore.kt    # Playlist persistence + weight calculation
+        ├── WebDavSync.kt       # Nextcloud WebDAV sync (OkHttp)
+        ├── DbSync.kt           # MySQL metadata sync (JDBC)
+        ├── SyncState.kt        # Sealed class: Idle / Syncing / Done / Error
+        ├── PlayerEnums.kt      # RatingFilter, PlaylistMode
+        └── ui/                 # Compose components and screens
+```
+
+**Stack:** Kotlin · Jetpack Compose · Media3 (ExoPlayer) · OkHttp · MySQL JDBC · Sentry · Coil
+
+---
 
 ## Requirements
 
-minSDK 21
+| Component      | Version               |
+|----------------|-----------------------|
+| Android Studio | Hedgehog 2023.1+      |
+| Android SDK    | API 26+ (Android 8.0) |
+| Kotlin         | 1.9.24                |
+| Gradle         | 8.7                   |
+| Java           | 17 (build host)       |
+
+**Runtime requirements:**
+
+- A Nextcloud instance accessible via WebDAV (optional — local playback works without it)
+- A MySQL 5.7+ / 8.0+ server with a `played` table (optional — ratings and stats require it)
+
+---
 
 ## Installation
 
-### Gradle
+### 1. Clone the repository
 
-```gradle
-implementation 'com.github.doublesymmetry:kotlinaudio:v2.0.0'
+```bash
+git clone https://github.com/<your-username>/KotlinAudio.git
+cd KotlinAudio
 ```
 
-## Usage
+### 2. Create `local.properties`
 
-### AudioPlayer
+The file is already listed in `.gitignore`. Create it at the project root:
 
-To get started playing some audio:
-
-```swift
-let player = AudioPlayer()
-let audioItem = DefaultAudioItem(audioUrl: "someUrl", type: MediaType.DEFAULT)
-player.load(item: audioItem, playWhenReady: true) // Load the item and start playing when the player is ready.
+```properties
+sdk.dir=/path/to/your/Android/Sdk
+# Nextcloud / WebDAV
+DEFAULT_SERVER_URL=https://your.nextcloud.server
+DEFAULT_USERNAME=your_username
+DEFAULT_PASSWORD=your_password
+DEFAULT_REMOTE_FOLDER=/path/to/Music
+# MySQL
+DEFAULT_MYSQL_HOST=your.mysql.host
+DEFAULT_MYSQL_PORT=3306
+DEFAULT_MYSQL_USER=db_user
+DEFAULT_MYSQL_PASSWORD=db_password
+DEFAULT_MYSQL_DB=database_name
+# Optional: phone numbers for quick-dial shortcuts
+BARIERA9=
+BARIERA10=
 ```
 
-To listen for events in the `AudioPlayer`, subscribe to events found in the `event` property of the `AudioPlayer`.
-To subscribe to an event:
+> All values are injected at build time via `BuildConfig` — they are never hardcoded in source
+> files.
+
+### 3. Open in Android Studio
+
+File → Open → select the `KotlinAudio` folder.
+
+Wait for Gradle sync to complete.
+
+### 4. Run
+
+Select the **`kotlin-audio-example`** run configuration, choose your device or emulator, and click *
+*Run**.
+
+### 5. First launch
+
+- Grant storage and notification permissions when prompted.
+- Open **Settings** (gear icon) and confirm server/database details if needed.
+- Tap **Sync** from the top menu to download music from Nextcloud.
+- Playback starts automatically after sync.
+
+---
+
+## MySQL Schema
+
+The app auto-creates the `played` table on first database sync:
+
+```sql
+CREATE TABLE IF NOT EXISTS played (
+    id          VARCHAR(512) PRIMARY KEY,
+    plays       INT          DEFAULT 0,
+    rate        INT          DEFAULT 0,
+    dance       TINYINT(1)   DEFAULT 0,
+    calm        TINYINT(1)   DEFAULT 0,
+    listen      BIGINT       DEFAULT 0,  -- accumulated milliseconds
+    duration    BIGINT       DEFAULT 0,  -- track duration in ms
+    updated     TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+```
+
+`id` is the relative file path within the remote folder (e.g. `Artist/Album/track.mp3`).
+
+---
+
+## Settings Reference
+
+All settings are persisted to `settings.json` on the device's external storage and can be edited
+from the in-app Settings screen.
+
+| Setting               | Description                                           |
+|-----------------------|-------------------------------------------------------|
+| Server URL            | Nextcloud base URL (e.g. `https://cloud.example.com`) |
+| Username / Password   | WebDAV credentials                                    |
+| Remote Folder         | Path on Nextcloud to sync from                        |
+| Local Folder          | Folder name inside device external storage            |
+| MySQL Host / Port     | Database server address                               |
+| MySQL User / Password | Database credentials                                  |
+| MySQL Database        | Database name                                         |
+
+---
+
+## KotlinAudio Library
+
+The `kotlin-audio` module is a self-contained Media3/ExoPlayer wrapper published separately. It
+provides:
+
+- `QueuedAudioPlayer` — queue management with next/previous/jump
+- `BaseAudioPlayer` — audio focus, becoming-noisy handling, caching
+- Kotlin Flow event streams: `stateChange`, `audioItemTransition`, `playbackError`,
+  `onPlayerActionTriggeredExternally`
+- Support for Progressive, HLS, DASH, and SmoothStreaming sources
+- `NotificationManager` for Media session and lock-screen controls
 
 ```kotlin
-// jetpack compose
+val player = QueuedAudioPlayer(
+  context, PlayerConfig(
+    handleAudioFocus = true,
+    handleAudioBecomingNoisy = true
+  )
+)
+
+val item = DefaultAudioItem(
+  audioUrl = "https://example.com/track.mp3",
+  type = MediaType.DEFAULT,
+  title = "Track Title",
+  artist = "Artist Name"
+)
+
+player.add(item, playWhenReady = true)
+
+// Observe state in Compose
 val state = player.event.stateChange.collectAsState(initial = AudioPlayerState.IDLE)
-
-// normal
-player.event.stateChange.collect {}
 ```
 
-#### QueuedAudioPlayer
+---
 
-The `QueuedAudioPlayer` is a subclass of `AudioPlayer` that maintains a queue of audio tracks.
+## Permissions
 
-```swift
-let player = QueuedAudioPlayer()
-let audioItem = DefaultAudioItem(audioUrl: "someUrl", type: MediaType.DEFAULT)
-player.add(item: audioItem, playWhenReady: true) // Since this is the first item, we can supply playWhenReady: true to immedietaly start playing when the item is loaded.
-```
+| Permission               | Purpose                                 |
+|--------------------------|-----------------------------------------|
+| `INTERNET`               | WebDAV sync, MySQL connection           |
+| `READ_MEDIA_AUDIO`       | Read audio files (Android 13+)          |
+| `READ_EXTERNAL_STORAGE`  | Read audio files (Android 10–12)        |
+| `WRITE_EXTERNAL_STORAGE` | Save synced files (Android 9 and below) |
+| `POST_NOTIFICATIONS`     | Playback notification                   |
+| `CALL_PHONE`             | Quick-dial shortcuts                    |
 
-When a track is done playing, the player will load the next track and update the queue.
-
-##### Navigating the queue
-
-All `AudioItem`s are stored in either `previousItems` or `nextItems`, which refers to items that come prior to the `currentItem` and after, respectively. The queue is navigated with:
-
-```swift
-player.next() // Increments the queue, and loads the next item.
-player.previous() // Decrements the queue, and loads the previous item.
-player.jumpToItem(index:) // Jumps to a certain item and loads that item.
-```
-
-##### Manipulating the queue
-
-```swift
- player.remove(index:) // Remove a specific item from the queue.
- player.removeUpcomingItems() // Remove all items in nextItems.
-```
+---
 
 ## License
 
-KotinAudio is available under the MIT license. See the LICENSE file for more info.
+This project is for personal use. The `kotlin-audio` library module is available under the **MIT
+License** — see [`LICENSE`](LICENSE) for details.
