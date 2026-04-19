@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        Traficul cleartext (HTTP) este permis explicit via această configurație,
+        în loc de android:usesCleartextTraffic="true" în manifest.
+        Necesar pentru serverul Nextcloud și MySQL de pe rețeaua locală a utilizatorului.
+    -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

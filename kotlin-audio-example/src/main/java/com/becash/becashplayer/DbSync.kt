@@ -6,7 +6,18 @@ import org.json.JSONObject
 import timber.log.Timber
 import java.sql.DriverManager
 
-object DbSync {
+class DbSync {
+
+    init {
+        Class.forName("com.mysql.jdbc.Driver")
+    }
+
+    private fun buildConnectionUrl(host: String, port: Int, database: String = ""): String {
+        val dbPart = if (database.isNotEmpty()) "/$database" else ""
+        return "jdbc:mysql://$host:$port$dbPart" +
+                "?useSSL=false&connectTimeout=5000&socketTimeout=10000" +
+                "&useUnicode=true&characterEncoding=UTF-8"
+    }
 
     suspend fun sync(
         host: String,
@@ -15,13 +26,7 @@ object DbSync {
         password: String,
         database: String,
     ): Map<String, JSONObject> = withContext(Dispatchers.IO) {
-        Class.forName("com.mysql.jdbc.Driver")
-        val baseUrl = "jdbc:mysql://$host:$port" +
-                "?useSSL=false&connectTimeout=5000&socketTimeout=10000" +
-                "&useUnicode=true&characterEncoding=UTF-8"
-
-        // Conectare fără bază de date pentru a o crea dacă nu există
-        DriverManager.getConnection(baseUrl, user, password).use { conn ->
+        DriverManager.getConnection(buildConnectionUrl(host, port), user, password).use { conn ->
             conn.createStatement().use { stmt ->
                 stmt.execute("CREATE DATABASE IF NOT EXISTS `$database` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
                 stmt.execute("USE `$database`")
@@ -64,11 +69,7 @@ object DbSync {
         database: String,
         songId: String,
     ) = withContext(Dispatchers.IO) {
-        Class.forName("com.mysql.jdbc.Driver")
-        val url = "jdbc:mysql://$host:$port/$database" +
-                "?useSSL=false&connectTimeout=5000&socketTimeout=10000" +
-                "&useUnicode=true&characterEncoding=UTF-8"
-        DriverManager.getConnection(url, user, password).use { conn ->
+        DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password).use { conn ->
             conn.prepareStatement(
                 "INSERT INTO played (id, plays) VALUES (?, 1) ON DUPLICATE KEY UPDATE plays = plays + 1"
             ).use { ps ->
@@ -89,11 +90,7 @@ object DbSync {
         milliseconds: Long,
         duration: Long,
     ) = withContext(Dispatchers.IO) {
-        Class.forName("com.mysql.jdbc.Driver")
-        val url = "jdbc:mysql://$host:$port/$database" +
-                "?useSSL=false&connectTimeout=5000&socketTimeout=10000" +
-                "&useUnicode=true&characterEncoding=UTF-8"
-        DriverManager.getConnection(url, user, password).use { conn ->
+        DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password).use { conn ->
             conn.prepareStatement(
                 "INSERT INTO played (id, listen, duration) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE listen = listen + ?, duration = IF(duration = 0, VALUES(duration), duration)"
             ).use { ps ->
@@ -118,11 +115,7 @@ object DbSync {
         dance: Boolean,
         calm: Boolean,
     ) = withContext(Dispatchers.IO) {
-        Class.forName("com.mysql.jdbc.Driver")
-        val url = "jdbc:mysql://$host:$port/$database" +
-                "?useSSL=false&connectTimeout=5000&socketTimeout=10000" +
-                "&useUnicode=true&characterEncoding=UTF-8"
-        DriverManager.getConnection(url, user, password).use { conn ->
+        DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password).use { conn ->
             conn.prepareStatement(
                 "INSERT INTO played (id, rate, dance, calm) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE rate = ?, dance = ?, calm = ?"
             ).use { ps ->

@@ -98,10 +98,15 @@ class AppSettings(context: Context) {
         get() = data.optString(KEY_MYSQL_DB, DEFAULT_MYSQL_DB)
         set(v) { data.put(KEY_MYSQL_DB, v); save() }
 
-    val bariera9: String get() = BARIERA9
-    val bariera10: String get() = BARIERA10
+    var bariera9: String
+        get() = data.optString(KEY_BARIERA9, "")
+        set(v) { data.put(KEY_BARIERA9, v); save() }
 
-    fun isConfigured(): Boolean =
+    var bariera10: String
+        get() = data.optString(KEY_BARIERA10, "")
+        set(v) { data.put(KEY_BARIERA10, v); save() }
+
+    fun isWebDavConfigured(): Boolean =
         serverUrl.isNotBlank() && username.isNotBlank() && password.isNotBlank()
 
     companion object {
@@ -121,8 +126,8 @@ class AppSettings(context: Context) {
         private const val KEY_MYSQL_USER       = "mysql_user"
         private const val KEY_MYSQL_PASSWORD   = "mysql_password"
         private const val KEY_MYSQL_DB         = "mysql_db"
-        const val BARIERA9  = "060625421"   // numărul barierei 9
-        const val BARIERA10 = "060625723"   // numărul barierei 10
+        private const val KEY_BARIERA9         = "bariera9"
+        private const val KEY_BARIERA10        = "bariera10"
 
         private const val DEFAULT_SERVER_URL      = ""
         private const val DEFAULT_USERNAME        = ""

@@ -16,7 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.becash.becashplayer.ext.millisecondsToString
+import com.becash.becashplayer.ext.toDurationString
 import com.becash.becashplayer.ui.theme.BecashPlayerTheme
 
 @Composable
@@ -79,7 +79,7 @@ fun TrackDisplay(
                     .padding(top = 4.dp, start = 8.dp, end = 8.dp)
             ) {
                 Text(
-                    text = position.millisecondsToString(),
+                    text = position.toDurationString(),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -91,7 +91,7 @@ fun TrackDisplay(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = duration.millisecondsToString(),
+                    text = duration.toDurationString(),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -29,7 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.becash.becashplayer.ext.millisecondsToString
+import com.becash.becashplayer.ext.toDurationString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -80,7 +80,7 @@ fun TrackInfoDialog(
                         it.toLongOrNull()?.let { bps -> "${bps / 1000} kbps" } ?: it
                     }
                     tryAdd(MediaMetadataRetriever.METADATA_KEY_DURATION, "Durată (tag)") {
-                        it.toLongOrNull()?.millisecondsToString() ?: it
+                        it.toLongOrNull()?.toDurationString() ?: it
                     }
                     tryAdd(MediaMetadataRetriever.METADATA_KEY_MIMETYPE, "MIME type")
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -137,10 +137,10 @@ fun TrackInfoDialog(
                             if (plays > 0) InfoRow("Redate", "$plays ori")
 
                             val listen = songInfo.optLong("listen", 0L)
-                            if (listen > 0) InfoRow("Timp ascultat", listen.millisecondsToString())
+                            if (listen > 0) InfoRow("Timp ascultat", listen.toDurationString())
 
                             val dur = songInfo.optLong("duration", 0L)
-                            if (dur > 0) InfoRow("Durată înregistrată", dur.millisecondsToString())
+                            if (dur > 0) InfoRow("Durată înregistrată", dur.toDurationString())
 
                             val rate = songInfo.optInt("rate", 0)
                             if (rate > 0) InfoRow("Apreciere", "$rate / 5")

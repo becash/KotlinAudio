@@ -51,6 +51,8 @@ fun SettingsScreen(
     var mysqlUser by remember { mutableStateOf(settings.mysqlUser) }
     var mysqlPassword by remember { mutableStateOf(settings.mysqlPassword) }
     var mysqlDatabase by remember { mutableStateOf(settings.mysqlDatabase) }
+    var bariera9 by remember { mutableStateOf(settings.bariera9) }
+    var bariera10 by remember { mutableStateOf(settings.bariera10) }
     var passwordVisible by remember { mutableStateOf(false) }
     var savedMessage by remember { mutableStateOf(false) }
 
@@ -229,6 +231,34 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Text(
+                    text = "Bariere (numere de telefon)",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                OutlinedTextField(
+                    value = bariera9,
+                    onValueChange = { bariera9 = it },
+                    label = { Text("Bariera 9 — număr telefon") },
+                    placeholder = { Text("06xxxxxxx") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = bariera10,
+                    onValueChange = { bariera10 = it },
+                    label = { Text("Bariera 10 — număr telefon") },
+                    placeholder = { Text("06xxxxxxx") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
@@ -245,6 +275,8 @@ fun SettingsScreen(
                         settings.mysqlUser = mysqlUser.trim()
                         settings.mysqlPassword = mysqlPassword
                         settings.mysqlDatabase = mysqlDatabase.trim().ifEmpty { "becash_player" }
+                        settings.bariera9 = bariera9.trim()
+                        settings.bariera10 = bariera10.trim()
                         savedMessage = true
                     },
                     modifier = Modifier.fillMaxWidth()

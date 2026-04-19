@@ -3,6 +3,7 @@ package com.becash.becashplayer
 import android.util.Base64
 import android.util.Xml
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -19,17 +20,11 @@ import java.util.concurrent.TimeUnit
 
 data class WebDavEntry(val href: String, val isDirectory: Boolean)
 
-sealed class SyncState {
-    object Idle : SyncState()
-    data class Syncing(val current: Int, val total: Int, val currentFile: String) : SyncState()
-    data class Done(val downloaded: Int, val skipped: Int) : SyncState()
-    data class Error(val message: String) : SyncState()
-}
+class WebDavSync {
 
-object WebDavSync {
-
-    private val AUDIO_EXTENSIONS = setOf("mp3", "wav", "flac", "aac", "ogg", "m4a", "wma", "opus")
-    private const val MAX_RETRIES = 3
+    companion object {
+        private const val MAX_RETRIES = 3
+    }
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -41,29 +36,17 @@ object WebDavSync {
         return "Basic " + Base64.encodeToString(credentials.toByteArray(), Base64.NO_WRAP)
     }
 
-    /**
-     * Extrage mereu doar protocol://host:port din serverUrl,
-     * indiferent dacă userul a pus sau nu calea WebDAV în URL.
-     */
     private fun extractBaseUrl(serverUrl: String): String {
         val u = URL(serverUrl)
         return "${u.protocol}://${u.host}${if (u.port != -1) ":${u.port}" else ""}"
     }
 
-    /**
-     * Construiește URL-ul WebDAV Nextcloud.
-     * Funcționează corect indiferent dacă serverUrl conține sau nu /remote.php/...
-     */
     private fun buildWebDavUrl(serverUrl: String, username: String, remotePath: String): String {
         val base = extractBaseUrl(serverUrl)
         val path = remotePath.trimStart('/')
         return "$base/remote.php/dav/files/$username/$path"
     }
 
-    /**
-     * Listează recursiv toate fișierele audio dintr-un folder WebDAV (PROPFIND Depth: infinity).
-     * Returnează lista de URL-uri complete ale fișierelor audio găsite.
-     */
     suspend fun listAudioFiles(
         serverUrl: String,
         username: String,
@@ -86,10 +69,7 @@ object WebDavSync {
 
             val request = Request.Builder()
                 .url(davUrl)
-                .method(
-                    "PROPFIND",
-                    propfindBody.toRequestBody("application/xml".toMediaType())
-                )
+                .method("PROPFIND", propfindBody.toRequestBody("application/xml".toMediaType()))
                 .header("Authorization", basicAuthHeader(username, password))
                 .header("Depth", "infinity")
                 .build()
@@ -124,12 +104,7 @@ object WebDavSync {
         }
     }
 
-    /**
-     * Descarcă un singur fișier WebDAV în folderul local.
-     * Download atomic: fișier temporar → rename.
-     * Încearcă de MAX_RETRIES ori cu pauze exponențiale la erori de rețea.
-     */
-    private fun downloadFile(
+    private suspend fun downloadFile(
         fileUrl: String,
         username: String,
         password: String,
@@ -138,7 +113,7 @@ object WebDavSync {
         val tmpFile = File(localFile.parent, "${localFile.name}.tmp")
         localFile.parentFile?.mkdirs()
 
-        repeat(MAX_RETRIES) { attempt ->
+        for (attempt in 0 until MAX_RETRIES) {
             try {
                 val request = Request.Builder()
                     .url(fileUrl)
@@ -150,7 +125,7 @@ object WebDavSync {
                 if (!response.isSuccessful) {
                     Timber.w("Download eșuat (HTTP ${response.code}) pentru ${localFile.name}")
                     response.close()
-                    return false  // eroare HTTP → nu reîncercăm
+                    return false
                 }
 
                 response.body?.byteStream()?.use { input ->
@@ -168,7 +143,7 @@ object WebDavSync {
                 if (attempt < MAX_RETRIES - 1) {
                     val delayMs = 1500L * (attempt + 1)
                     Timber.w("Reîncercare ${attempt + 1}/$MAX_RETRIES pentru ${localFile.name} după ${delayMs}ms (${e.message})")
-                    Thread.sleep(delayMs)
+                    delay(delayMs)
                 } else {
                     Timber.e(e, "Eroare la descărcarea: $fileUrl")
                 }
@@ -177,9 +152,6 @@ object WebDavSync {
         return false
     }
 
-    /**
-     * Sincronizare completă: listează remote, descarcă fișierele lipsă local.
-     */
     suspend fun sync(
         settings: AppSettings,
         localDir: File,
@@ -246,10 +218,6 @@ object WebDavSync {
         withContext(Dispatchers.Main) { onProgress(SyncState.Done(downloaded = downloaded, skipped = skipped)) }
     }
 
-    /**
-     * Șterge un fișier de pe serverul WebDAV.
-     * remotePath ex: /BecashShare/Music/883/song.mp3
-     */
     suspend fun deleteFile(
         serverUrl: String,
         username: String,
@@ -273,10 +241,6 @@ object WebDavSync {
             false
         }
     }
-
-    // -------------------------------------------------------------------------
-    // XML parsing pentru răspunsul PROPFIND
-    // -------------------------------------------------------------------------
 
     private fun parsePropfindResponse(xml: String): List<WebDavEntry> {
         val entries = mutableListOf<WebDavEntry>()

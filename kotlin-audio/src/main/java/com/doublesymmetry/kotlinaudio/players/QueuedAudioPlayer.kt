@@ -3,9 +3,9 @@ package com.doublesymmetry.kotlinaudio.players
 import android.content.Context
 import com.doublesymmetry.kotlinaudio.models.*
 import com.doublesymmetry.kotlinaudio.players.components.getAudioItemHolder
-import com.google.android.exoplayer2.C
-import com.google.android.exoplayer2.IllegalSeekPositionException
-import com.google.android.exoplayer2.source.MediaSource
+import androidx.media3.common.C
+import androidx.media3.common.IllegalSeekPositionException
+import androidx.media3.exoplayer.source.MediaSource
 import java.util.*
 import kotlin.math.max
 import kotlin.math.min
@@ -38,14 +38,14 @@ class QueuedAudioPlayer(
         }
 
     val items: List<AudioItem>
-        get() = queue.map { it.mediaItem.getAudioItemHolder().audioItem }
+        get() = queue.mapNotNull { it.mediaItem.getAudioItemHolder()?.audioItem }
 
     val previousItems: List<AudioItem>
         get() {
             return if (queue.isEmpty()) emptyList()
             else queue
                 .subList(0, exoPlayer.currentMediaItemIndex)
-                .map { it.mediaItem.getAudioItemHolder().audioItem }
+                .mapNotNull { it.mediaItem.getAudioItemHolder()?.audioItem }
         }
 
     val nextItems: List<AudioItem>
@@ -53,7 +53,7 @@ class QueuedAudioPlayer(
             return if (queue.isEmpty()) emptyList()
             else queue
                 .subList(exoPlayer.currentMediaItemIndex, queue.lastIndex)
-                .map { it.mediaItem.getAudioItemHolder().audioItem }
+                .mapNotNull { it.mediaItem.getAudioItemHolder()?.audioItem }
         }
 
     val nextItem: AudioItem?
