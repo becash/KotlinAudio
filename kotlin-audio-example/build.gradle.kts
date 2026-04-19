@@ -1,6 +1,12 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+val localProps = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
 
 android {
@@ -18,6 +24,18 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        buildConfigField("String", "DEFAULT_SERVER_URL",     "\"${localProps["DEFAULT_SERVER_URL"]}\"")
+        buildConfigField("String", "DEFAULT_USERNAME",       "\"${localProps["DEFAULT_USERNAME"]}\"")
+        buildConfigField("String", "DEFAULT_PASSWORD",       "\"${localProps["DEFAULT_PASSWORD"]}\"")
+        buildConfigField("String", "DEFAULT_REMOTE_FOLDER",  "\"${localProps["DEFAULT_REMOTE_FOLDER"]}\"")
+        buildConfigField("String", "DEFAULT_MYSQL_HOST",     "\"${localProps["DEFAULT_MYSQL_HOST"]}\"")
+        buildConfigField("int",    "DEFAULT_MYSQL_PORT",     "${localProps["DEFAULT_MYSQL_PORT"]}")
+        buildConfigField("String", "DEFAULT_MYSQL_USER",     "\"${localProps["DEFAULT_MYSQL_USER"]}\"")
+        buildConfigField("String", "DEFAULT_MYSQL_PASSWORD", "\"${localProps["DEFAULT_MYSQL_PASSWORD"]}\"")
+        buildConfigField("String", "DEFAULT_MYSQL_DB",       "\"${localProps["DEFAULT_MYSQL_DB"]}\"")
+        buildConfigField("String", "BARIERA9",               "\"${localProps["BARIERA9"]}\"")
+        buildConfigField("String", "BARIERA10",              "\"${localProps["BARIERA10"]}\"")
     }
 
     buildTypes {
@@ -40,6 +58,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"

@@ -129,18 +129,25 @@ class AppSettings(context: Context) {
         private const val KEY_BARIERA9         = "bariera9"
         private const val KEY_BARIERA10        = "bariera10"
 
-        private const val DEFAULT_SERVER_URL      = ""
-        private const val DEFAULT_USERNAME        = ""
-        private const val DEFAULT_PASSWORD        = ""
-        private const val DEFAULT_REMOTE_FOLDER   = ""
-        private const val DEFAULT_LOCAL_FOLDER    = ""
+        val BARIERA9  get() = BuildConfig.BARIERA9
+        val BARIERA10 get() = BuildConfig.BARIERA10
+
+        private val DEFAULT_SERVER_URL      get() = BuildConfig.DEFAULT_SERVER_URL
+        private val DEFAULT_USERNAME        get() = BuildConfig.DEFAULT_USERNAME
+        private val DEFAULT_PASSWORD        get() = BuildConfig.DEFAULT_PASSWORD
+        private val DEFAULT_REMOTE_FOLDER   get() = BuildConfig.DEFAULT_REMOTE_FOLDER
+        private const val DEFAULT_LOCAL_FOLDER    = "Audio"
         private const val DEFAULT_LAST_TRACK_INDEX = 0
-        private const val DEFAULT_LAST_PLAYLIST   = "SHUFFLE"
-        private const val DEFAULT_MYSQL_HOST      = ""
-        private const val DEFAULT_MYSQL_PORT      = 3306
-        private const val DEFAULT_MYSQL_USER      = ""
-        private const val DEFAULT_MYSQL_PASSWORD  = ""
+        private const val DEFAULT_LAST_PLAYLIST     = "SHUFFLE"
         private const val DEFAULT_LAST_RATING_FILTER = "ALL"
-        private const val DEFAULT_MYSQL_DB        = "becash_player"
+        private val DEFAULT_MYSQL_HOST      get() = BuildConfig.DEFAULT_MYSQL_HOST
+        private val DEFAULT_MYSQL_PORT      get() = BuildConfig.DEFAULT_MYSQL_PORT
+        private val DEFAULT_MYSQL_USER      get() = BuildConfig.DEFAULT_MYSQL_USER
+        private val DEFAULT_MYSQL_PASSWORD  get() = BuildConfig.DEFAULT_MYSQL_PASSWORD
+        private val DEFAULT_MYSQL_DB        get() = BuildConfig.DEFAULT_MYSQL_DB
+
+
+
+
     }
 }
