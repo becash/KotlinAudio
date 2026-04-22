@@ -1,6 +1,7 @@
 package com.becash.becashplayer
 
 import android.content.Context
+import io.sentry.Sentry
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -17,14 +18,30 @@ class PlaylistStore {
     }
 
     private fun readJsonArray(context: Context): JSONArray {
-        val file = File(context.getExternalFilesDir(null), FILE_NAME)
-        return if (!file.exists()) JSONArray()
-        else try { JSONArray(file.readText()) } catch (_: Exception) { JSONArray() }
+        val dir = context.getExternalFilesDir(null) ?: run {
+            Sentry.captureMessage("PlaylistStore: getExternalFilesDir=null la citire playlist")
+            return JSONArray()
+        }
+        val file = File(dir, FILE_NAME)
+        if (!file.exists()) return JSONArray()
+        return try {
+            JSONArray(file.readText())
+        } catch (e: Exception) {
+            Sentry.captureException(e)
+            JSONArray()
+        }
     }
 
     private fun writeJsonArray(context: Context, arr: JSONArray) {
-        File(context.getExternalFilesDir(null), FILE_NAME)
-            .writeText(arr.toString(2).replace("\\/", "/"))
+        val dir = context.getExternalFilesDir(null) ?: run {
+            Sentry.captureMessage("PlaylistStore: getExternalFilesDir=null la scriere playlist")
+            return
+        }
+        try {
+            File(dir, FILE_NAME).writeText(arr.toString(2).replace("\\/", "/"))
+        } catch (e: Exception) {
+            Sentry.captureException(e)
+        }
     }
 
     fun loadAsMap(context: Context): Map<String, JSONObject> {

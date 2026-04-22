@@ -1,5 +1,3 @@
-@file:OptIn(androidx.media3.common.util.UnstableApi::class)
-
 package com.becash.becashplayer
 
 import android.Manifest
@@ -47,10 +45,9 @@ import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.SelfImprovement
 import androidx.compose.material.icons.rounded.Sync
-import androidx.compose.material.icons.rounded.LooksTwo
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -142,7 +139,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        Timber.plant(Timber.DebugTree())
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
@@ -342,7 +338,6 @@ class MainActivity : ComponentActivity() {
                             RatingFilter.BEST        to Icons.Rounded.Public,
                             RatingFilter.DANCE       to Icons.Rounded.EmojiPeople,
                             RatingFilter.CALM        to Icons.Rounded.SelfImprovement,
-                            RatingFilter.RATE2       to Icons.Rounded.LooksTwo,
                         )
                     }
                     val activePlaylistIcon = playlistFilters.firstOrNull { it.first == vm.ratingFilter }?.second
@@ -350,7 +345,7 @@ class MainActivity : ComponentActivity() {
                     Box {
                         IconButton(onClick = { playlistMenuExpanded = true }) {
                             Icon(
-                                imageVector = activePlaylistIcon ?: Icons.Rounded.QueueMusic,
+                                imageVector = activePlaylistIcon ?: Icons.AutoMirrored.Rounded.QueueMusic,
                                 contentDescription = "Playlist",
                                 tint = if (vm.ratingFilter != RatingFilter.ALL)
                                     MaterialTheme.colorScheme.primary

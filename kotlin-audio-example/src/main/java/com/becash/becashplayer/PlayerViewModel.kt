@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import io.sentry.Sentry
 import timber.log.Timber
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -104,6 +105,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         player.event.playbackError
             .onEach { error ->
                 Timber.e("Eroare redare (${error.code}): ${error.message} — se trece la piesa următoare")
+                Sentry.captureMessage("Playback error cod=${error.code}: ${error.message} | piesa=${player.currentItem?.audioUrl}")
                 player.next()
             }
             .launchIn(viewModelScope)
@@ -160,6 +162,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                             )
                         } catch (e: Exception) {
                             Timber.e(e, "incrementPlays error")
+                            Sentry.captureException(e)
                         }
                     }
                 }
@@ -229,6 +232,10 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 buildLocalAudioItems() to playlistStore.loadAsMap(app)
             }
             if (items.isEmpty()) {
+                val audioDir = File(Environment.getExternalStorageDirectory(), appSettings.localFolderName)
+                Sentry.captureMessage(
+                    "loadAndPlay: playlist gol | dir=${audioDir.absolutePath} | exists=${audioDir.exists()} | canRead=${audioDir.canRead()}"
+                )
                 showToast("Folderul '${appSettings.localFolderName}' este gol. Sincronizează din Nextcloud.", Toast.LENGTH_LONG)
                 return@launch
             }
@@ -269,6 +276,11 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         val audioDir = File(Environment.getExternalStorageDirectory(), appSettings.localFolderName)
         val paths = playlistStore.load(app, audioDir.absolutePath).ifEmpty {
             val scanned = scanAudioFiles(audioDir)
+            if (scanned.isEmpty()) {
+                Sentry.captureMessage(
+                    "buildLocalAudioItems: scanAudioFiles gol | dir=${audioDir.absolutePath} | exists=${audioDir.exists()} | canRead=${audioDir.canRead()} | isManageStorageGranted=${android.os.Environment.isExternalStorageManager()}"
+                )
+            }
             if (scanned.isNotEmpty()) playlistStore.save(app, scanned, audioDir.absolutePath)
             scanned
         }
@@ -353,6 +365,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 )
             } catch (e: Exception) {
                 Timber.e(e, "addListen error")
+                Sentry.captureException(e)
             }
         }
     }
@@ -380,6 +393,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                     )
                 } catch (e: Exception) {
                     Timber.e(e, "setRateDance error")
+                    Sentry.captureException(e)
                 }
             }
         }
@@ -444,6 +458,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 showToast("MySQL: ${result.size} cântece sincronizate.", Toast.LENGTH_SHORT)
             } catch (e: Exception) {
                 Timber.e(e, "DbSync error")
+                Sentry.captureException(e)
                 showToast("Eroare MySQL: ${e.message}", Toast.LENGTH_LONG)
             } finally {
                 isDbSyncBusy = false
@@ -519,7 +534,6 @@ fun passesRatingFilter(relPath: String, songInfoMap: Map<String, JSONObject>, fi
         RatingFilter.BEST        -> rate == 5
         RatingFilter.DANCE       -> dance
         RatingFilter.CALM        -> calm
-        RatingFilter.RATE2       -> rate == 2
         RatingFilter.ALL         -> true
     }
 }

@@ -1,20 +1,26 @@
 package com.becash.becashplayer
 
 import android.content.Context
+import io.sentry.Sentry
 import org.json.JSONObject
 import java.io.File
 
 class AppSettings(context: Context) {
 
-    private val file = File(context.getExternalFilesDir(null), "settings.json")
+    private val dir: File = context.getExternalFilesDir(null) ?: run {
+        Sentry.captureMessage("AppSettings: getExternalFilesDir=null, fallback la filesDir")
+        context.filesDir
+    }
+    private val file = File(dir, "settings.json")
 
     private val data: JSONObject = when {
         file.exists() -> try {
             JSONObject(file.readText())
-        } catch (_: Exception) {
-            defaults().also { file.writeText(it.toString(2)) }
+        } catch (e: Exception) {
+            Sentry.captureException(e)
+            defaults().also { runCatching { file.writeText(it.toString(2)) } }
         }
-        else -> defaults().also { file.writeText(it.toString(2)) }
+        else -> defaults().also { runCatching { file.writeText(it.toString(2)) } }
     }
 
     private fun defaults() = JSONObject().apply {
@@ -30,9 +36,12 @@ class AppSettings(context: Context) {
         put(KEY_MYSQL_USER,       DEFAULT_MYSQL_USER)
         put(KEY_MYSQL_PASSWORD,   DEFAULT_MYSQL_PASSWORD)
         put(KEY_MYSQL_DB,         DEFAULT_MYSQL_DB)
+        put(KEY_BARIERA9,         BuildConfig.BARIERA9)
+        put(KEY_BARIERA10,        BuildConfig.BARIERA10)
     }
 
-    private fun save() = file.writeText(data.toString(2))
+    private fun save() = runCatching { file.writeText(data.toString(2)) }
+        .onFailure { Sentry.captureException(it) }
 
     var serverUrl: String
         get() = data.optString(KEY_SERVER_URL, DEFAULT_SERVER_URL)
@@ -99,11 +108,11 @@ class AppSettings(context: Context) {
         set(v) { data.put(KEY_MYSQL_DB, v); save() }
 
     var bariera9: String
-        get() = data.optString(KEY_BARIERA9, "")
+        get() = data.optString(KEY_BARIERA9, BuildConfig.BARIERA9)
         set(v) { data.put(KEY_BARIERA9, v); save() }
 
     var bariera10: String
-        get() = data.optString(KEY_BARIERA10, "")
+        get() = data.optString(KEY_BARIERA10, BuildConfig.BARIERA10)
         set(v) { data.put(KEY_BARIERA10, v); save() }
 
     fun isWebDavConfigured(): Boolean =
@@ -145,9 +154,5 @@ class AppSettings(context: Context) {
         private val DEFAULT_MYSQL_USER      get() = BuildConfig.DEFAULT_MYSQL_USER
         private val DEFAULT_MYSQL_PASSWORD  get() = BuildConfig.DEFAULT_MYSQL_PASSWORD
         private val DEFAULT_MYSQL_DB        get() = BuildConfig.DEFAULT_MYSQL_DB
-
-
-
-
     }
 }

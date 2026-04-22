@@ -1,7 +1,7 @@
 package com.becash.becashplayer
 
 enum class RatingFilter {
-    ALL, WITH_RATING, NO_RATING, TOP, BEST, DANCE, CALM, RATE2;
+    ALL, WITH_RATING, NO_RATING, TOP, BEST, DANCE, CALM;
 
     val label get() = when (this) {
         ALL         -> "Toate"
@@ -11,7 +11,6 @@ enum class RatingFilter {
         BEST        -> "Top public"
         DANCE       -> "Dans"
         CALM        -> "Liniștit"
-        RATE2       -> "Apreciere 2"
     }
 }
 
