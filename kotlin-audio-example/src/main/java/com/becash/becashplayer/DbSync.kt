@@ -1,15 +1,34 @@
 package com.becash.becashplayer
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import timber.log.Timber
+import java.net.SocketTimeoutException
 import java.sql.DriverManager
+import java.sql.SQLException
 
 class DbSync {
 
     init {
         Class.forName("com.mysql.jdbc.Driver")
+    }
+
+    private suspend fun <T> withRetry(maxAttempts: Int = 5, delayMs: Long = 3000L, block: suspend () -> T): T {
+        var attempt = 0
+        while (true) {
+            try {
+                return block()
+            } catch (e: Exception) {
+                val isNetworkError = e is SocketTimeoutException ||
+                    e is SQLException && e.message?.contains("Communications link failure") == true ||
+                    e.cause is SocketTimeoutException
+                if (!isNetworkError || ++attempt >= maxAttempts) throw e
+                Timber.w("DbSync: connection failed (attempt $attempt/$maxAttempts), retry in ${delayMs}ms")
+                delay(delayMs)
+            }
+        }
     }
 
     private fun buildConnectionUrl(host: String, port: Int, database: String = ""): String {
@@ -26,7 +45,7 @@ class DbSync {
         password: String,
         database: String,
     ): Map<String, JSONObject> = withContext(Dispatchers.IO) {
-        DriverManager.getConnection(buildConnectionUrl(host, port), user, password).use { conn ->
+        withRetry { DriverManager.getConnection(buildConnectionUrl(host, port), user, password) }.use { conn ->
             conn.createStatement().use { stmt ->
                 stmt.execute("CREATE DATABASE IF NOT EXISTS `$database` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
                 stmt.execute("USE `$database`")
@@ -69,7 +88,7 @@ class DbSync {
         database: String,
         songId: String,
     ) = withContext(Dispatchers.IO) {
-        DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password).use { conn ->
+        withRetry { DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password) }.use { conn ->
             conn.prepareStatement(
                 "INSERT INTO played (id, plays) VALUES (?, 1) ON DUPLICATE KEY UPDATE plays = plays + 1"
             ).use { ps ->
@@ -90,7 +109,7 @@ class DbSync {
         milliseconds: Long,
         duration: Long,
     ) = withContext(Dispatchers.IO) {
-        DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password).use { conn ->
+        withRetry { DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password) }.use { conn ->
             conn.prepareStatement(
                 "INSERT INTO played (id, listen, duration) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE listen = listen + ?, duration = IF(duration = 0, VALUES(duration), duration)"
             ).use { ps ->
@@ -115,7 +134,7 @@ class DbSync {
         dance: Boolean,
         calm: Boolean,
     ) = withContext(Dispatchers.IO) {
-        DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password).use { conn ->
+        withRetry { DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password) }.use { conn ->
             conn.prepareStatement(
                 "INSERT INTO played (id, rate, dance, calm) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE rate = ?, dance = ?, calm = ?"
             ).use { ps ->

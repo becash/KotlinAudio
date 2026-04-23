@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import io.sentry.Sentry
+import io.sentry.SentryLevel
 import timber.log.Timber
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -202,6 +203,10 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             withContext(Dispatchers.IO) {
                 localFile.delete()
                 val updated = playlistStore.load(app, audioRootDir.absolutePath).filter { it != localPath }
+                Sentry.captureMessage(
+                    "deleteCurrentTrack: save() apelat cu ${updated.size} căi (suprascrie date îmbogățite cu ID-uri simple) | șters=$relativePath",
+                    SentryLevel.INFO
+                )
                 playlistStore.save(app, updated, audioRootDir.absolutePath)
             }
             reloadPlayer()
@@ -279,6 +284,18 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             if (scanned.isEmpty()) {
                 Sentry.captureMessage(
                     "buildLocalAudioItems: scanAudioFiles gol | dir=${audioDir.absolutePath} | exists=${audioDir.exists()} | canRead=${audioDir.canRead()} | isManageStorageGranted=${android.os.Environment.isExternalStorageManager()}"
+                )
+            } else {
+                val playlistFile = app.getExternalFilesDir(null)?.let { File(it, "playlist.json") }
+                val fileState = when {
+                    playlistFile == null -> "stocare externă indisponibilă"
+                    !playlistFile.exists() -> "lipsă"
+                    playlistFile.length() == 0L -> "gol (0B)"
+                    else -> "corupt/invalid (${playlistFile.length()}B)"
+                }
+                Sentry.captureMessage(
+                    "buildLocalAudioItems: load() gol → scanare directă (${scanned.size} fișiere) | playlist.json $fileState",
+                    SentryLevel.WARNING
                 )
             }
             if (scanned.isNotEmpty()) playlistStore.save(app, scanned, audioDir.absolutePath)
@@ -417,6 +434,12 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                             val paths = scanAudioFiles(localDir)
                             val basePath = localDir.absolutePath
                             val relIds = paths.map { "/${it.removePrefix("$basePath/")}" }
+                            if (songInfoMap.isEmpty()) {
+                                Sentry.captureMessage(
+                                    "startSync: songInfoMap gol → saveEnriched fără date MySQL | fișiere=${paths.size}",
+                                    SentryLevel.WARNING
+                                )
+                            }
                             playlistStore.saveEnriched(app, relIds, songInfoMap)
                         }
                         reloadPlayer()

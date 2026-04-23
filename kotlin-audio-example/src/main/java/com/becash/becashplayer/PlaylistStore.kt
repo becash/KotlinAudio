@@ -1,7 +1,9 @@
 package com.becash.becashplayer
 
 import android.content.Context
+import android.os.Environment
 import io.sentry.Sentry
+import io.sentry.SentryLevel
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -23,11 +25,39 @@ class PlaylistStore {
             return JSONArray()
         }
         val file = File(dir, FILE_NAME)
-        if (!file.exists()) return JSONArray()
+        if (!file.exists()) {
+            Sentry.captureMessage(
+                "PlaylistStore: $FILE_NAME lipsă | cale=${file.absolutePath} | isExternalStorageManager=${Environment.isExternalStorageManager()}",
+                SentryLevel.WARNING
+            )
+            return JSONArray()
+        }
+        val fileSize = file.length()
+        if (fileSize == 0L) {
+            Sentry.captureMessage(
+                "PlaylistStore: $FILE_NAME gol (0 bytes) | cale=${file.absolutePath}",
+                SentryLevel.WARNING
+            )
+            return JSONArray()
+        }
         return try {
-            JSONArray(file.readText())
+            val arr = JSONArray(file.readText())
+            val bareCount = (0 until arr.length()).count { i ->
+                (arr.optJSONObject(i)?.length() ?: 0) <= 1
+            }
+            if (arr.length() > 0 && bareCount == arr.length()) {
+                Sentry.captureMessage(
+                    "PlaylistStore: playlist conține DOAR ID-uri (${arr.length()} intrări fără date îmbogățite) | fișier=${fileSize}B",
+                    SentryLevel.WARNING
+                )
+            }
+            arr
         } catch (e: Exception) {
-            Sentry.captureException(e)
+            Sentry.withScope { scope ->
+                scope.setExtra("file_size_bytes", fileSize.toString())
+                scope.setExtra("file_path", file.absolutePath)
+                Sentry.captureException(e)
+            }
             JSONArray()
         }
     }
@@ -37,8 +67,17 @@ class PlaylistStore {
             Sentry.captureMessage("PlaylistStore: getExternalFilesDir=null la scriere playlist")
             return
         }
+        val bareCount = (0 until arr.length()).count { i ->
+            (arr.optJSONObject(i)?.length() ?: 0) <= 1
+        }
         try {
             File(dir, FILE_NAME).writeText(arr.toString(2).replace("\\/", "/"))
+            if (arr.length() > 0 && bareCount == arr.length()) {
+                Sentry.captureMessage(
+                    "PlaylistStore: scris playlist cu DOAR ID-uri (${arr.length()} intrări, fără date îmbogățite)",
+                    SentryLevel.WARNING
+                )
+            }
         } catch (e: Exception) {
             Sentry.captureException(e)
         }
@@ -77,6 +116,10 @@ class PlaylistStore {
     }
 
     fun save(context: Context, paths: List<String>, baseDir: String = "") {
+        Sentry.captureMessage(
+            "PlaylistStore.save: salvare ${paths.size} căi ca ID-uri simple (fără date îmbogățite) | baseDir=${baseDir.ifBlank { "<none>" }}",
+            SentryLevel.INFO
+        )
         val arr = JSONArray()
         val prefix = if (baseDir.isNotEmpty()) "${baseDir.trimEnd('/')}/" else ""
         paths.forEach { path ->
@@ -95,6 +138,12 @@ class PlaylistStore {
      *   - se calculează și câmpul "completeness" (listen / duration×plays)
      */
     fun saveEnriched(context: Context, ids: List<String>, infoMap: Map<String, JSONObject>) {
+        if (ids.isNotEmpty() && infoMap.isEmpty()) {
+            Sentry.captureMessage(
+                "PlaylistStore.saveEnriched: infoMap gol → playlist se va salva cu DOAR ID-uri | ids.size=${ids.size}",
+                SentryLevel.WARNING
+            )
+        }
         val now = System.currentTimeMillis()
         val normalizedIds = ids.map { if (it.startsWith("/")) it else "/$it" }
         val weights = calculateShuffleWeights(normalizedIds, infoMap, now)
