@@ -202,12 +202,9 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 localFile.delete()
-                val updated = playlistStore.load(app, audioRootDir.absolutePath).filter { it != localPath }
-                Sentry.captureMessage(
-                    "deleteCurrentTrack: save() apelat cu ${updated.size} căi (suprascrie date îmbogățite cu ID-uri simple) | șters=$relativePath",
-                    SentryLevel.INFO
-                )
-                playlistStore.save(app, updated, audioRootDir.absolutePath)
+                val deletedId = "/$relativePath"
+                val remainingMap = playlistStore.loadAsMap(app) - deletedId
+                playlistStore.saveEnriched(app, remainingMap.keys.toList(), remainingMap)
             }
             reloadPlayer()
             webDavSync.deleteFile(
@@ -298,7 +295,10 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                     SentryLevel.WARNING
                 )
             }
-            if (scanned.isNotEmpty()) playlistStore.save(app, scanned, audioDir.absolutePath)
+            if (scanned.isNotEmpty()) {
+                val relIds = scanned.map { "/${it.removePrefix("${audioDir.absolutePath}/")}" }
+                playlistStore.saveEnriched(app, relIds, songInfoMap)
+            }
             scanned
         }
         val files = if (playlistMode == PlaylistMode.SHUFFLE) {
@@ -322,7 +322,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 ?.toRelativeString(audioDir)
                 ?: ""
             DefaultAudioItem(
-                audioUrl = "file://${file.absolutePath}",
+                audioUrl = Uri.fromFile(file).toString(),
                 type = MediaType.DEFAULT,
                 title = file.nameWithoutExtension,
                 artist = folderName,

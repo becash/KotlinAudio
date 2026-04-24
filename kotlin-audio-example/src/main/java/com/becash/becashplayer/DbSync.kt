@@ -45,7 +45,13 @@ class DbSync {
         password: String,
         database: String,
     ): Map<String, JSONObject> = withContext(Dispatchers.IO) {
-        withRetry { DriverManager.getConnection(buildConnectionUrl(host, port), user, password) }.use { conn ->
+        val conn = try {
+            withRetry { DriverManager.getConnection(buildConnectionUrl(host, port), user, password) }
+        } catch (e: Exception) {
+            Timber.w("DbSync: sync skipped — ${e.message}")
+            return@withContext emptyMap()
+        }
+        conn.use { conn ->
             conn.createStatement().use { stmt ->
                 stmt.execute("CREATE DATABASE IF NOT EXISTS `$database` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
                 stmt.execute("USE `$database`")
@@ -88,8 +94,14 @@ class DbSync {
         database: String,
         songId: String,
     ) = withContext(Dispatchers.IO) {
-        withRetry { DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password) }.use { conn ->
-            conn.prepareStatement(
+        val conn = try {
+            withRetry { DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password) }
+        } catch (e: Exception) {
+            Timber.w("DbSync: incrementPlays skipped — ${e.message}")
+            return@withContext
+        }
+        conn.use {
+            it.prepareStatement(
                 "INSERT INTO played (id, plays) VALUES (?, 1) ON DUPLICATE KEY UPDATE plays = plays + 1"
             ).use { ps ->
                 ps.setString(1, songId)
@@ -109,8 +121,14 @@ class DbSync {
         milliseconds: Long,
         duration: Long,
     ) = withContext(Dispatchers.IO) {
-        withRetry { DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password) }.use { conn ->
-            conn.prepareStatement(
+        val conn = try {
+            withRetry { DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password) }
+        } catch (e: Exception) {
+            Timber.w("DbSync: addListen skipped — ${e.message}")
+            return@withContext
+        }
+        conn.use {
+            it.prepareStatement(
                 "INSERT INTO played (id, listen, duration) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE listen = listen + ?, duration = IF(duration = 0, VALUES(duration), duration)"
             ).use { ps ->
                 ps.setString(1, songId)
@@ -134,8 +152,14 @@ class DbSync {
         dance: Boolean,
         calm: Boolean,
     ) = withContext(Dispatchers.IO) {
-        withRetry { DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password) }.use { conn ->
-            conn.prepareStatement(
+        val conn = try {
+            withRetry { DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password) }
+        } catch (e: Exception) {
+            Timber.w("DbSync: setRateDance skipped — ${e.message}")
+            return@withContext
+        }
+        conn.use {
+            it.prepareStatement(
                 "INSERT INTO played (id, rate, dance, calm) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE rate = ?, dance = ?, calm = ?"
             ).use { ps ->
                 ps.setString(1, songId)
