@@ -183,6 +183,23 @@ class WebDavSync {
                 "${settings.remoteFolderPath.trimStart('/')}/"
         val serverBase = extractBaseUrl(settings.serverUrl)
 
+        val remoteRelativePaths = remoteFiles.map { fileUrl ->
+            val encodedRelative = fileUrl.removePrefix(serverBase).removePrefix(davPrefix)
+            try { URLDecoder.decode(encodedRelative, "UTF-8") } catch (_: Exception) { encodedRelative }
+        }.toSet()
+
+        var deleted = 0
+        localDir.walkTopDown()
+            .filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS }
+            .forEach { localFile ->
+                val relativePath = localFile.relativeTo(localDir).path
+                if (relativePath !in remoteRelativePaths) {
+                    localFile.delete()
+                    Timber.d("Șters local (absent din remote): $relativePath")
+                    deleted++
+                }
+            }
+
         var downloaded = 0
         var skipped = 0
 
@@ -215,7 +232,7 @@ class WebDavSync {
             }
         }
 
-        withContext(Dispatchers.Main) { onProgress(SyncState.Done(downloaded = downloaded, skipped = skipped)) }
+        withContext(Dispatchers.Main) { onProgress(SyncState.Done(downloaded = downloaded, skipped = skipped, deleted = deleted)) }
     }
 
     suspend fun deleteFile(

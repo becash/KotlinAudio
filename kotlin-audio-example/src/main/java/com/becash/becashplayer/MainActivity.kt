@@ -99,6 +99,7 @@ import com.becash.becashplayer.ext.toDurationString
 import org.json.JSONObject
 import timber.log.Timber
 import java.io.File
+import java.net.URLDecoder
 import java.util.concurrent.TimeUnit
 
 
@@ -220,9 +221,9 @@ class MainActivity : ComponentActivity() {
         val audioBaseDir = remember {
             File(Environment.getExternalStorageDirectory(), vm.appSettings.localFolderName).absolutePath
         }
-        val songInfoByUrl = remember(vm.songInfoMap) {
+        val songInfoByUrl = remember(vm.songInfoMap, audioBaseDir) {
             vm.songInfoMap.entries.associate { (songId, doc) ->
-                "file://$audioBaseDir/${songId.trimStart('/')}" to doc
+                Uri.fromFile(File("$audioBaseDir/${songId.trimStart('/')}")).toString() to doc
             }
         }
 
@@ -239,21 +240,16 @@ class MainActivity : ComponentActivity() {
 
         val currentRelPath = remember(vm.currentTrackIndex, vm.playlistItems) {
             vm.playlistItems.getOrNull(vm.currentTrackIndex)?.audioUrl
+                ?.let { url -> try { URLDecoder.decode(url, "UTF-8") } catch (_: Exception) { url } }
                 ?.removePrefix("file://$audioBaseDir")
         }
         val currentSongId = remember(currentRelPath) {
             currentRelPath?.let { if (it.startsWith("/")) it else "/$it" }
         }
 
-        // Indecșii care trec filtrul de rating (pentru PlaylistView)
+        // Indecșii care trec filtrul de rating (pentru PlaylistView) — sursă unică din ViewModel
         val ratingFilterSet by remember(vm.ratingFilter, vm.songInfoMap, vm.playlistItems) {
-            derivedStateOf {
-                if (vm.ratingFilter == RatingFilter.ALL) null
-                else vm.playlistItems.mapIndexedNotNull { idx, item ->
-                    val relPath = item.audioUrl.removePrefix("file://$audioBaseDir")
-                    if (passesRatingFilter(relPath, vm.songInfoMap, vm.ratingFilter)) idx else null
-                }.toSet()
-            }
+            derivedStateOf { vm.ratingFilteredIndices }
         }
 
         // Poziția cântecului curent în lista filtrată (pentru eticheta "N / total")

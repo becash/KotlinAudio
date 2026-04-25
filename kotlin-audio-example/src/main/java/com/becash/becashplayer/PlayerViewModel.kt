@@ -30,6 +30,7 @@ import io.sentry.Sentry
 import io.sentry.SentryLevel
 import timber.log.Timber
 import java.io.File
+import java.net.URLDecoder
 import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
@@ -61,6 +62,17 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     val audioBaseDir: String
         get() = File(Environment.getExternalStorageDirectory(), appSettings.localFolderName).absolutePath
 
+    val ratingFilteredIndices: Set<Int>?
+        get() {
+            if (ratingFilter == RatingFilter.ALL) return null
+            val base = audioBaseDir
+            return playlistItems.mapIndexedNotNull { idx, item ->
+                val decoded = try { URLDecoder.decode(item.audioUrl, "UTF-8") } catch (_: Exception) { item.audioUrl }
+                val relPath = decoded.removePrefix("file://$base")
+                if (passesRatingFilter(relPath, songInfoMap, ratingFilter)) idx else null
+            }.toSet()
+        }
+
     val filteredIndices: List<Int>
         get() {
             val indexed = playlistItems.mapIndexed { i, item -> i to item }
@@ -68,11 +80,9 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                           else indexed.sortedWith(compareBy({ it.second.artist ?: "" }, { it.second.title ?: "" }))
             val afterText = if (filterQuery.isBlank()) ordered
                             else ordered.filter { (_, item) -> matchesTextFilter(item, filterQuery, filterInverted) }
-            val afterRating = if (ratingFilter == RatingFilter.ALL) afterText
-                              else afterText.filter { (_, item) ->
-                                  val relPath = item.audioUrl.removePrefix("file://$audioBaseDir")
-                                  passesRatingFilter(relPath, songInfoMap, ratingFilter)
-                              }
+            val allowed = ratingFilteredIndices
+            val afterRating = if (allowed == null) afterText
+                              else afterText.filter { (i, _) -> i in allowed }
             return afterRating.map { it.first }
         }
 
@@ -133,6 +143,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 flushListen()
                 val base = audioBaseDir
                 val currentSongId = player.currentItem?.audioUrl
+                    ?.let { url -> try { URLDecoder.decode(url, "UTF-8") } catch (_: Exception) { url } }
                     ?.removePrefix("file://$base")
                     ?.let { url -> if (url.startsWith("/")) url else "/$url" }
                 listenSongId = currentSongId
@@ -196,8 +207,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         val audioRootDir = File(Environment.getExternalStorageDirectory(), appSettings.localFolderName)
         val relativePath = localFile.toRelativeString(audioRootDir)
         val remoteFilePath = "${appSettings.remoteFolderPath.trimEnd('/')}/$relativePath"
-
-        player.next()
+        val deletedIndex = player.currentIndex
 
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
@@ -206,7 +216,9 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 val remainingMap = playlistStore.loadAsMap(app) - deletedId
                 playlistStore.saveEnriched(app, remainingMap.keys.toList(), remainingMap)
             }
-            reloadPlayer()
+            player.remove(deletedIndex)
+            playlistItems = player.items
+            currentTrackIndex = player.currentIndex
             webDavSync.deleteFile(
                 serverUrl = appSettings.serverUrl,
                 username = appSettings.username,
@@ -443,8 +455,9 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                             playlistStore.saveEnriched(app, relIds, songInfoMap)
                         }
                         reloadPlayer()
+                        val deletedMsg = if (state.deleted > 0) ", ${state.deleted} șterse local" else ""
                         showToast(
-                            "Sincronizare completă: ${state.downloaded} descărcate, ${state.skipped} existau deja.",
+                            "Sincronizare completă: ${state.downloaded} descărcate, ${state.skipped} existau deja$deletedMsg.",
                             Toast.LENGTH_LONG
                         )
                         startDbSync()
@@ -500,8 +513,8 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         when (action) {
             MediaSessionCallback.PLAY -> player.play()
             MediaSessionCallback.PAUSE -> player.pause()
-            MediaSessionCallback.NEXT -> player.next()
-            MediaSessionCallback.PREVIOUS -> player.previous()
+            MediaSessionCallback.NEXT -> nextFiltered()
+            MediaSessionCallback.PREVIOUS -> previousFiltered()
             MediaSessionCallback.STOP -> player.stop()
             is MediaSessionCallback.SEEK -> player.seek(action.positionMs, TimeUnit.MILLISECONDS)
             else -> Timber.d("Event not handled")
