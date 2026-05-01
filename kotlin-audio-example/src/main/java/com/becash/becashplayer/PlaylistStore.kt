@@ -110,9 +110,22 @@ class PlaylistStore {
             val obj = arr.optJSONObject(i) ?: continue
             val id = obj.optString("id").takeIf { it.isNotBlank() } ?: continue
             val weight = obj.optDouble("shuffle_weight", -1.0)
-            if (weight > 0) result[id] = weight
+            if (weight >= 0) result[id] = weight
         }
         return result
+    }
+
+    fun zeroWeight(context: Context, songId: String) {
+        val arr = readJsonArray(context)
+        val normalizedId = if (songId.startsWith("/")) songId else "/$songId"
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            if (obj.optString("id") == normalizedId) {
+                obj.put("shuffle_weight", 0.0)
+                break
+            }
+        }
+        writeJsonArray(context, arr)
     }
 
     fun save(context: Context, paths: List<String>, baseDir: String = "") {
@@ -132,8 +145,8 @@ class PlaylistStore {
     /**
      * Salvează playlist-ul îmbogățit cu datele din MySQL și calculează coeficienții
      * de shuffle ponderat (câmp "shuffle_weight"):
-     *   - plays=0 → weight = 1000 × (max_plays+1)
-     *   - plays>0 → weight = 1000 × max_plays / plays  (proporțional invers)
+     *   - plays=0 → weight = 1000 × (max_plays+1)²
+     *   - plays>0 → weight = 1000 × (max_plays / plays)²  (invers pătratic — diferența ~10× mai mare față de liniar)
      *   - greutatea se dublează pentru fiecare lună (max 12) față de câmpul "updated"
      *   - se calculează și câmpul "completeness" (listen / duration×plays)
      */
@@ -178,9 +191,9 @@ class PlaylistStore {
         return ids.mapIndexed { index, id ->
             val plays = playsValues[index]
             var weight = if (plays == 0) {
-                1000.0 * (maxPlays + 1)
+                1000.0 * (maxPlays + 1).toDouble().pow(2)
             } else {
-                1000.0 * maxPlays.toDouble() / plays.toDouble()
+                1000.0 * (maxPlays.toDouble() / plays.toDouble()).pow(2)
             }
 
             val updatedRaw = infoMap[id]?.optString("updated")

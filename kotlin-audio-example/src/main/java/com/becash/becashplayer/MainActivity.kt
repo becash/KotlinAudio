@@ -47,6 +47,8 @@ import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.SelfImprovement
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
@@ -237,6 +239,7 @@ class MainActivity : ComponentActivity() {
 
         var showTrackInfoDialog by remember { mutableStateOf(false) }
         var showRateDanceDialog by remember { mutableStateOf(false) }
+        var showQuickPanel by remember { mutableStateOf(false) }
 
         val currentRelPath = remember(vm.currentTrackIndex, vm.playlistItems) {
             vm.playlistItems.getOrNull(vm.currentTrackIndex)?.audioUrl
@@ -380,6 +383,13 @@ class MainActivity : ComponentActivity() {
                         Icon(Icons.Rounded.Info, contentDescription = "Detalii cântec curent",
                             tint = MaterialTheme.colorScheme.onSurface)
                     }
+                    IconButton(onClick = { showQuickPanel = !showQuickPanel }) {
+                        Icon(
+                            imageVector = if (showQuickPanel) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            contentDescription = "Panou rapid",
+                            tint = if (showQuickPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                     Spacer(modifier = Modifier.weight(1f))
                     IconButton(onClick = { vm.deleteCurrentTrack() }) {
                         Icon(Icons.Rounded.DeleteForever, contentDescription = "Șterge cântecul curent",
@@ -474,6 +484,46 @@ class MainActivity : ComponentActivity() {
                                 tint = if (vm.filterInverted) MaterialTheme.colorScheme.primary
                                        else MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+                    }
+                    if (showQuickPanel && currentRelPath != null && currentSongId != null) {
+                        val qInfo = vm.songInfoMap[currentRelPath]
+                        val qRate  = qInfo?.optInt("rate", 0) ?: 0
+                        val qDance = qInfo?.opt("dance").let { it == true || it == 1 || it?.toString() == "1" }
+                        val qCalm  = qInfo?.opt("calm").let  { it == true || it == 1 || it?.toString() == "1" }
+                        val activeColor = MaterialTheme.colorScheme.error
+                        val inactiveColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = { vm.updateRateDance(currentSongId, currentRelPath, if (qRate == 3) 0 else 3, qDance, qCalm) }) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Rounded.Star, contentDescription = "Rating 3",
+                                        tint = if (qRate == 3) activeColor else inactiveColor)
+                                    Text("3", style = MaterialTheme.typography.labelMedium,
+                                        color = if (qRate == 3) activeColor else inactiveColor)
+                                }
+                            }
+                            IconButton(onClick = { vm.updateRateDance(currentSongId, currentRelPath, if (qRate == 4) 0 else 4, qDance, qCalm) }) {
+                                Icon(Icons.Rounded.Person, contentDescription = "Top personal (4)",
+                                    tint = if (qRate == 4) activeColor else inactiveColor)
+                            }
+                            IconButton(onClick = { vm.updateRateDance(currentSongId, currentRelPath, if (qRate == 5) 0 else 5, qDance, qCalm) }) {
+                                Icon(Icons.Rounded.Public, contentDescription = "Top public (5)",
+                                    tint = if (qRate == 5) activeColor else inactiveColor)
+                            }
+                            IconButton(onClick = { vm.updateRateDance(currentSongId, currentRelPath, qRate, !qDance, qCalm) }) {
+                                Icon(Icons.Rounded.EmojiPeople, contentDescription = "Muzică dans",
+                                    tint = if (qDance) activeColor else inactiveColor)
+                            }
+                            IconButton(onClick = { vm.updateRateDance(currentSongId, currentRelPath, qRate, qDance, !qCalm) }) {
+                                Icon(Icons.Rounded.SelfImprovement, contentDescription = "Liniștit",
+                                    tint = if (qCalm) activeColor else inactiveColor)
+                            }
                         }
                     }
                 }

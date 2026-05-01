@@ -140,7 +140,13 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
 
         player.event.audioItemTransition
             .onEach {
+                val justPlayedSongId = listenSongId
                 flushListen()
+                if (justPlayedSongId != null) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        playlistStore.zeroWeight(app, justPlayedSongId)
+                    }
+                }
                 val base = audioBaseDir
                 val currentSongId = player.currentItem?.audioUrl
                     ?.let { url -> try { URLDecoder.decode(url, "UTF-8") } catch (_: Exception) { url } }
@@ -321,7 +327,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 val base = audioDir.absolutePath
                 val filesWithWeights = fileList.map { f ->
                     val id = f.absolutePath.removePrefix(base)
-                    f to (weightsMap[id] ?: 1.0)
+                    f to (if (weightsMap.containsKey(id)) weightsMap[id]!! else 1.0)
                 }
                 weightedShuffle(filesWithWeights)
             }
