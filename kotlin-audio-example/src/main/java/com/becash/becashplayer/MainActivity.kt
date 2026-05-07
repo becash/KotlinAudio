@@ -15,8 +15,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.view.WindowCompat
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +52,7 @@ import androidx.compose.material.icons.rounded.SelfImprovement
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.AirplanemodeActive
 import androidx.compose.material.icons.rounded.Wifi
@@ -285,60 +288,83 @@ class MainActivity : ComponentActivity() {
                     horizontalArrangement = Arrangement.Start,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = { vm.applyPlaylistMode(vm.playlistMode.next()) }) {
-                        val icon = when (vm.playlistMode) {
-                            PlaylistMode.SHUFFLE  -> Icons.Rounded.Shuffle
-                            PlaylistMode.NORMAL   -> Icons.Rounded.Repeat
-                            PlaylistMode.PLAY_ONE -> Icons.Rounded.RepeatOne
-                        }
-                        val tint = when (vm.playlistMode) {
-                            PlaylistMode.NORMAL -> MaterialTheme.colorScheme.onSurface
-                            else               -> MaterialTheme.colorScheme.primary
-                        }
-                        Icon(icon, contentDescription = vm.playlistMode.label, tint = tint)
-                    }
-
-                    BadgedBox(
-                        badge = {
-                            if (vm.offlineQueueCount > 0) {
-                                Badge {
-                                    Text(if (vm.offlineQueueCount > 99) "99+" else "${vm.offlineQueueCount}")
-                                }
+                    var modeMenuExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { modeMenuExpanded = true }) {
+                            val icon = when (vm.playlistMode) {
+                                PlaylistMode.SHUFFLE  -> Icons.Rounded.Shuffle
+                                PlaylistMode.NORMAL   -> Icons.Rounded.Repeat
+                                PlaylistMode.PLAY_ONE -> Icons.Rounded.RepeatOne
+                                PlaylistMode.MANUAL   -> Icons.Rounded.TouchApp
                             }
+                            val tint = when (vm.playlistMode) {
+                                PlaylistMode.NORMAL -> MaterialTheme.colorScheme.onSurface
+                                else               -> MaterialTheme.colorScheme.primary
+                            }
+                            Icon(icon, contentDescription = vm.playlistMode.label, tint = tint)
                         }
-                    ) {
-                        IconButton(onClick = { vm.toggleOfflineMode() }) {
-                            Icon(
-                                if (vm.isOfflineMode) Icons.Rounded.AirplanemodeActive else Icons.Rounded.Wifi,
-                                contentDescription = if (vm.isOfflineMode)
-                                    "Mod offline — ${vm.offlineQueueCount} în coadă"
-                                else
-                                    "Mod online",
-                                tint = if (vm.isOfflineMode)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurface
-                            )
+                        DropdownMenu(expanded = modeMenuExpanded, onDismissRequest = { modeMenuExpanded = false }) {
+                            listOf(
+                                PlaylistMode.SHUFFLE  to Icons.Rounded.Shuffle,
+                                PlaylistMode.NORMAL   to Icons.Rounded.Repeat,
+                                PlaylistMode.PLAY_ONE to Icons.Rounded.RepeatOne,
+                                PlaylistMode.MANUAL   to Icons.Rounded.TouchApp,
+                            ).forEach { (mode, icon) ->
+                                val active = vm.playlistMode == mode
+                                DropdownMenuItem(
+                                    text = { Text(mode.label) },
+                                    leadingIcon = {
+                                        Icon(icon, contentDescription = null,
+                                            tint = if (active) MaterialTheme.colorScheme.primary else LocalContentColor.current)
+                                    },
+                                    onClick = { modeMenuExpanded = false; vm.applyPlaylistMode(mode) }
+                                )
+                            }
                         }
                     }
 
                     var menuExpanded by remember { mutableStateOf(false) }
                     Box {
-                        IconButton(onClick = { menuExpanded = true }) {
-                            Icon(
-                                Icons.Rounded.MoreVert,
-                                contentDescription = "Mai multe opțiuni",
-                                tint = if (vm.syncState is SyncState.Syncing)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurface
-                            )
+                        BadgedBox(
+                            badge = {
+                                if (vm.offlineQueueCount > 0) {
+                                    Badge {
+                                        Text(if (vm.offlineQueueCount > 99) "99+" else "${vm.offlineQueueCount}")
+                                    }
+                                }
+                            }
+                        ) {
+                            IconButton(onClick = { menuExpanded = true }) {
+                                Icon(
+                                    Icons.Rounded.MoreVert,
+                                    contentDescription = "Mai multe opțiuni",
+                                    tint = if (vm.syncState is SyncState.Syncing || vm.isOfflineMode)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                             DropdownMenuItem(
                                 text = { Text("Sincronizează Nextcloud") },
                                 leadingIcon = { Icon(Icons.Rounded.Sync, contentDescription = null) },
                                 onClick = { menuExpanded = false; vm.startSync() }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    val label = if (vm.isOfflineMode) "Mod offline" else "Mod online"
+                                    val suffix = if (vm.offlineQueueCount > 0) " — ${vm.offlineQueueCount} în coadă" else ""
+                                    Text(label + suffix)
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        if (vm.isOfflineMode) Icons.Rounded.AirplanemodeActive else Icons.Rounded.Wifi,
+                                        contentDescription = null,
+                                        tint = if (vm.isOfflineMode) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                                    )
+                                },
+                                onClick = { menuExpanded = false; vm.toggleOfflineMode() }
                             )
                             if (vm.appSettings.bariera9.isNotBlank()) {
                                 DropdownMenuItem(
@@ -483,6 +509,10 @@ class MainActivity : ComponentActivity() {
                         filterInverted = vm.filterInverted,
                         songInfoByUrl = songInfoByUrl,
                         allowedIndices = ratingFilterSet,
+                        manualNextIndex = if (vm.playlistMode == PlaylistMode.MANUAL) vm.manualNextIndex else null,
+                        onItemLongClick = if (vm.playlistMode == PlaylistMode.MANUAL) { index ->
+                            vm.manualNextIndex = if (vm.manualNextIndex == index) null else index
+                        } else null,
                         modifier = Modifier.weight(1f)
                     )
                     Row(
@@ -628,6 +658,7 @@ fun SyncStatusBar(modifier: Modifier = Modifier, syncState: SyncState) {
 // -------------------------------------------------------------------------
 // Playlist
 // -------------------------------------------------------------------------
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PlaylistView(
     items: List<AudioItem>,
@@ -637,6 +668,8 @@ fun PlaylistView(
     filterInverted: Boolean,
     songInfoByUrl: Map<String, JSONObject> = emptyMap(),
     allowedIndices: Set<Int>? = null,
+    manualNextIndex: Int? = null,
+    onItemLongClick: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val sorted = remember(items, allowedIndices) {
@@ -664,9 +697,13 @@ fun PlaylistView(
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
             itemsIndexed(filtered) { listPos, (playerIndex, item) ->
                 val isPlaying = playerIndex == currentIndex
+                val isManualNext = playerIndex == manualNextIndex
                 val rowNumber = listPos + 1
-                val itemColor = if (isPlaying) MaterialTheme.colorScheme.onPrimaryContainer
-                                else MaterialTheme.colorScheme.onSurfaceVariant
+                val itemColor = when {
+                    isPlaying    -> MaterialTheme.colorScheme.onPrimaryContainer
+                    isManualNext -> MaterialTheme.colorScheme.onTertiaryContainer
+                    else         -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
                 val info = songInfoByUrl[item.audioUrl]
                 val dur = info?.optLong("duration", 0L)?.takeIf { it > 0 }
                 val rate = info?.optInt("rate", 0)?.takeIf { it > 0 }
@@ -675,8 +712,15 @@ fun PlaylistView(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(if (isPlaying) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
-                        .clickable { onItemClick(playerIndex) }
+                        .background(when {
+                            isPlaying    -> MaterialTheme.colorScheme.primaryContainer
+                            isManualNext -> MaterialTheme.colorScheme.tertiaryContainer
+                            else         -> MaterialTheme.colorScheme.surface
+                        })
+                        .combinedClickable(
+                            onClick = { onItemClick(playerIndex) },
+                            onLongClick = { onItemLongClick?.invoke(playerIndex) }
+                        )
                         .padding(horizontal = 16.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -689,7 +733,11 @@ fun PlaylistView(
                         }
                         Text(text = item.title ?: "",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (isPlaying) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                            color = when {
+                                isPlaying    -> MaterialTheme.colorScheme.onPrimaryContainer
+                                isManualNext -> MaterialTheme.colorScheme.onTertiaryContainer
+                                else         -> MaterialTheme.colorScheme.onSurface
+                            },
                             maxLines = 1)
                     }
                     Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(start = 8.dp)) {

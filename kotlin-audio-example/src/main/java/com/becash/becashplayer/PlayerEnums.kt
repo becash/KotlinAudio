@@ -15,17 +15,19 @@ enum class RatingFilter {
 }
 
 enum class PlaylistMode {
-    SHUFFLE, NORMAL, PLAY_ONE;
+    SHUFFLE, NORMAL, PLAY_ONE, MANUAL;
 
     fun next() = when (this) {
         SHUFFLE  -> NORMAL
         NORMAL   -> PLAY_ONE
-        PLAY_ONE -> SHUFFLE
+        PLAY_ONE -> MANUAL
+        MANUAL   -> SHUFFLE
     }
 
     val label get() = when (this) {
         SHUFFLE  -> "Shuffle"
         NORMAL   -> "Normal"
         PLAY_ONE -> "Play One"
+        MANUAL   -> "Manual"
     }
 }

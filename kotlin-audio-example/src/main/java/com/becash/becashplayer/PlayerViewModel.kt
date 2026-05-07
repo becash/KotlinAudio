@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.doublesymmetry.kotlinaudio.models.AudioItem
+import com.doublesymmetry.kotlinaudio.models.AudioItemTransitionReason
 import com.doublesymmetry.kotlinaudio.models.AudioPlayerState
 import com.doublesymmetry.kotlinaudio.models.DefaultAudioItem
 import com.doublesymmetry.kotlinaudio.models.MediaSessionCallback
@@ -56,6 +57,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     var ratingFilter by mutableStateOf(RatingFilter.ALL)
     var isOfflineMode by mutableStateOf(false)
     var offlineQueueCount by mutableStateOf(0)
+    var manualNextIndex by mutableStateOf<Int?>(null)
 
     private var listenSongId: String? = null
     private var listenDuration = 0L
@@ -144,7 +146,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             .launchIn(viewModelScope)
 
         player.event.audioItemTransition
-            .onEach {
+            .onEach { reason ->
                 val justPlayedSongId = listenSongId
                 flushListen()
                 if (justPlayedSongId != null) {
@@ -158,6 +160,19 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                     ?.removePrefix("file://$base")
                     ?.let { url -> if (url.startsWith("/")) url else "/$url" }
                 listenSongId = currentSongId
+
+                // MANUAL: trebuie interceptat înainte de orice logică de filtrare
+                if (playlistMode == PlaylistMode.MANUAL && reason is AudioItemTransitionReason.REPEAT) {
+                    val nextIdx = manualNextIndex
+                    if (nextIdx != null) {
+                        manualNextIndex = null
+                        player.jumpToItem(nextIdx)
+                        player.play()
+                    } else {
+                        player.pause()
+                    }
+                    return@onEach
+                }
 
                 val newIndex = player.currentIndex
                 val fi = filteredIndices
@@ -201,6 +216,15 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun nextFiltered() {
+        if (playlistMode == PlaylistMode.MANUAL) {
+            val nextIdx = manualNextIndex
+            if (nextIdx != null) {
+                manualNextIndex = null
+                player.jumpToItem(nextIdx)
+                player.play()
+            }
+            return
+        }
         val indices = filteredIndices
         if (indices.isEmpty()) { player.next(); return }
         val pos = indices.indexOf(currentTrackIndex)
@@ -210,6 +234,10 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun previousFiltered() {
+        if (playlistMode == PlaylistMode.MANUAL) {
+            player.seek(0L, TimeUnit.MILLISECONDS)
+            return
+        }
         val indices = filteredIndices
         if (indices.isEmpty()) { player.previous(); return }
         val pos = indices.indexOf(currentTrackIndex)
@@ -250,10 +278,12 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     fun applyPlaylistMode(mode: PlaylistMode) {
         appSettings.lastPlaylistMode = mode.name
         playlistMode = mode
+        manualNextIndex = null
         when (mode) {
             PlaylistMode.SHUFFLE  -> { player.playerOptions.repeatMode = RepeatMode.ALL; reloadPlayer() }
             PlaylistMode.NORMAL   -> { player.playerOptions.repeatMode = RepeatMode.ALL; reloadPlayer() }
-            PlaylistMode.PLAY_ONE -> { player.playerOptions.repeatMode = RepeatMode.ONE }
+            PlaylistMode.PLAY_ONE -> player.playerOptions.repeatMode = RepeatMode.ONE
+            PlaylistMode.MANUAL   -> player.playerOptions.repeatMode = RepeatMode.ONE
         }
     }
 
@@ -288,10 +318,10 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun reloadPlayer() {
         val currentUrl = player.currentItem?.audioUrl
+        val savedPosition = player.position
+        val wasPlaying = player.playerState == AudioPlayerState.PLAYING
         viewModelScope.launch {
             val items = withContext(Dispatchers.IO) {
-                // Zerăm greutatea cântecului curent înainte de rebuild, altfel
-                // rămâne cu greutatea mare și sare din nou în față la fiecare sync
                 if (playlistMode == PlaylistMode.SHUFFLE && currentUrl != null) {
                     val base = audioBaseDir
                     val decoded = try { URLDecoder.decode(currentUrl, "UTF-8") } catch (_: Exception) { currentUrl }
@@ -309,7 +339,8 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 items.indexOfFirst { it.audioUrl == currentUrl }.coerceAtLeast(0)
             else 0
             if (resumeIndex > 0) player.jumpToItem(resumeIndex)
-            player.play()
+            if (savedPosition > 0) player.seek(savedPosition, TimeUnit.MILLISECONDS)
+            if (wasPlaying) player.play()
             playlistItems = player.items
             currentTrackIndex = player.currentIndex
         }
@@ -560,6 +591,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 }
                 songInfoMap = playlistStore.loadAsMap(app)
                 showToast("MySQL: ${result.size} cântece sincronizate.", Toast.LENGTH_SHORT)
+                reloadPlayer()
             } catch (e: Exception) {
                 Timber.e(e, "DbSync error")
                 Sentry.captureException(e)
