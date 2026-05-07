@@ -40,6 +40,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     val playlistStore = PlaylistStore()
     val webDavSync = WebDavSync()
     val dbSync = DbSync()
+    val offlineQueue = OfflineQueue(app)
 
     val player: QueuedAudioPlayer
 
@@ -53,6 +54,8 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     var songInfoMap by mutableStateOf<Map<String, JSONObject>>(emptyMap())
     var isDbSyncBusy by mutableStateOf(false)
     var ratingFilter by mutableStateOf(RatingFilter.ALL)
+    var isOfflineMode by mutableStateOf(false)
+    var offlineQueueCount by mutableStateOf(0)
 
     private var listenSongId: String? = null
     private var listenDuration = 0L
@@ -91,6 +94,8 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         filterQuery = appSettings.filterQuery
         filterInverted = appSettings.filterInverted
         ratingFilter = try { RatingFilter.valueOf(appSettings.lastRatingFilter) } catch (_: Exception) { RatingFilter.ALL }
+        isOfflineMode = appSettings.isOfflineMode
+        offlineQueueCount = offlineQueue.count()
         songInfoMap = playlistStore.loadAsMap(app)
 
         player = QueuedAudioPlayer(
@@ -170,17 +175,24 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 if (currentSongId != null && appSettings.mysqlHost.isNotBlank()) {
                     viewModelScope.launch(Dispatchers.IO) {
                         try {
-                            dbSync.incrementPlays(
-                                host = appSettings.mysqlHost,
-                                port = appSettings.mysqlPort,
-                                user = appSettings.mysqlUser,
-                                password = appSettings.mysqlPassword,
-                                database = appSettings.mysqlDatabase,
-                                songId = currentSongId,
-                            )
+                            if (isOfflineMode) {
+                                offlineQueue.enqueueIncrementPlays(currentSongId)
+                                offlineQueueCount = offlineQueue.count()
+                            } else {
+                                dbSync.incrementPlays(
+                                    host = appSettings.mysqlHost,
+                                    port = appSettings.mysqlPort,
+                                    user = appSettings.mysqlUser,
+                                    password = appSettings.mysqlPassword,
+                                    database = appSettings.mysqlDatabase,
+                                    songId = currentSongId,
+                                )
+                            }
                         } catch (e: Exception) {
                             Timber.e(e, "incrementPlays error")
                             Sentry.captureException(e)
+                            offlineQueue.enqueueIncrementPlays(currentSongId)
+                            offlineQueueCount = offlineQueue.count()
                         }
                     }
                 }
@@ -277,7 +289,18 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     fun reloadPlayer() {
         val currentUrl = player.currentItem?.audioUrl
         viewModelScope.launch {
-            val items = withContext(Dispatchers.IO) { buildLocalAudioItems() }
+            val items = withContext(Dispatchers.IO) {
+                // Zerăm greutatea cântecului curent înainte de rebuild, altfel
+                // rămâne cu greutatea mare și sare din nou în față la fiecare sync
+                if (playlistMode == PlaylistMode.SHUFFLE && currentUrl != null) {
+                    val base = audioBaseDir
+                    val decoded = try { URLDecoder.decode(currentUrl, "UTF-8") } catch (_: Exception) { currentUrl }
+                    val songId = decoded.removePrefix("file://$base")
+                        .let { if (it.startsWith("/")) it else "/$it" }
+                    playlistStore.zeroWeight(app, songId)
+                }
+                buildLocalAudioItems()
+            }
             if (items.isEmpty()) return@launch
             player.stop()
             player.clear()
@@ -388,19 +411,26 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         if (ms <= 0 || appSettings.mysqlHost.isBlank()) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                dbSync.addListen(
-                    host = appSettings.mysqlHost,
-                    port = appSettings.mysqlPort,
-                    user = appSettings.mysqlUser,
-                    password = appSettings.mysqlPassword,
-                    database = appSettings.mysqlDatabase,
-                    songId = songId,
-                    milliseconds = ms,
-                    duration = dur,
-                )
+                if (isOfflineMode) {
+                    offlineQueue.enqueueAddListen(songId, ms, dur)
+                    offlineQueueCount = offlineQueue.count()
+                } else {
+                    dbSync.addListen(
+                        host = appSettings.mysqlHost,
+                        port = appSettings.mysqlPort,
+                        user = appSettings.mysqlUser,
+                        password = appSettings.mysqlPassword,
+                        database = appSettings.mysqlDatabase,
+                        songId = songId,
+                        milliseconds = ms,
+                        duration = dur,
+                    )
+                }
             } catch (e: Exception) {
                 Timber.e(e, "addListen error")
                 Sentry.captureException(e)
+                offlineQueue.enqueueAddListen(songId, ms, dur)
+                offlineQueueCount = offlineQueue.count()
             }
         }
     }
@@ -415,21 +445,53 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         if (appSettings.mysqlHost.isNotBlank()) {
             viewModelScope.launch(Dispatchers.IO) {
                 try {
-                    dbSync.setRateDance(
-                        host = appSettings.mysqlHost,
-                        port = appSettings.mysqlPort,
-                        user = appSettings.mysqlUser,
-                        password = appSettings.mysqlPassword,
-                        database = appSettings.mysqlDatabase,
-                        songId = songId,
-                        rate = rate,
-                        dance = dance,
-                        calm = calm,
-                    )
+                    if (isOfflineMode) {
+                        offlineQueue.enqueueSetRateDance(songId, rate, dance, calm)
+                        offlineQueueCount = offlineQueue.count()
+                    } else {
+                        dbSync.setRateDance(
+                            host = appSettings.mysqlHost,
+                            port = appSettings.mysqlPort,
+                            user = appSettings.mysqlUser,
+                            password = appSettings.mysqlPassword,
+                            database = appSettings.mysqlDatabase,
+                            songId = songId,
+                            rate = rate,
+                            dance = dance,
+                            calm = calm,
+                        )
+                    }
                 } catch (e: Exception) {
                     Timber.e(e, "setRateDance error")
                     Sentry.captureException(e)
+                    offlineQueue.enqueueSetRateDance(songId, rate, dance, calm)
+                    offlineQueueCount = offlineQueue.count()
                 }
+            }
+        }
+    }
+
+    fun toggleOfflineMode() {
+        val wasOffline = isOfflineMode
+        isOfflineMode = !wasOffline
+        appSettings.isOfflineMode = isOfflineMode
+        if (wasOffline && appSettings.mysqlHost.isNotBlank() && offlineQueueCount > 0) {
+            flushOfflineQueue()
+        }
+    }
+
+    fun flushOfflineQueue() {
+        if (appSettings.mysqlHost.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val sent = offlineQueue.flushToDb(dbSync, appSettings)
+                offlineQueueCount = 0
+                showToast("$sent operații trimise la MySQL.", Toast.LENGTH_SHORT)
+            } catch (e: Exception) {
+                offlineQueueCount = offlineQueue.count()
+                Timber.e(e, "flushOfflineQueue error")
+                Sentry.captureException(e)
+                showToast("Eroare trimitere offline: ${e.message}", Toast.LENGTH_LONG)
             }
         }
     }

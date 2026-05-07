@@ -115,6 +115,10 @@ class AppSettings(context: Context) {
         get() = data.optString(KEY_BARIERA10, BuildConfig.BARIERA10)
         set(v) { data.put(KEY_BARIERA10, v); save() }
 
+    var isOfflineMode: Boolean
+        get() = data.optBoolean(KEY_OFFLINE_MODE, false)
+        set(v) { data.put(KEY_OFFLINE_MODE, v); save() }
+
     fun isWebDavConfigured(): Boolean =
         serverUrl.isNotBlank() && username.isNotBlank() && password.isNotBlank()
 
@@ -137,6 +141,7 @@ class AppSettings(context: Context) {
         private const val KEY_MYSQL_DB         = "mysql_db"
         private const val KEY_BARIERA9         = "bariera9"
         private const val KEY_BARIERA10        = "bariera10"
+        private const val KEY_OFFLINE_MODE     = "offline_mode"
 
         val BARIERA9  get() = BuildConfig.BARIERA9
         val BARIERA10 get() = BuildConfig.BARIERA10

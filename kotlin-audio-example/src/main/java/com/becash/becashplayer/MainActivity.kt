@@ -51,6 +51,10 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.AirplanemodeActive
+import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.RadioButton
@@ -292,6 +296,30 @@ class MainActivity : ComponentActivity() {
                             else               -> MaterialTheme.colorScheme.primary
                         }
                         Icon(icon, contentDescription = vm.playlistMode.label, tint = tint)
+                    }
+
+                    BadgedBox(
+                        badge = {
+                            if (vm.offlineQueueCount > 0) {
+                                Badge {
+                                    Text(if (vm.offlineQueueCount > 99) "99+" else "${vm.offlineQueueCount}")
+                                }
+                            }
+                        }
+                    ) {
+                        IconButton(onClick = { vm.toggleOfflineMode() }) {
+                            Icon(
+                                if (vm.isOfflineMode) Icons.Rounded.AirplanemodeActive else Icons.Rounded.Wifi,
+                                contentDescription = if (vm.isOfflineMode)
+                                    "Mod offline — ${vm.offlineQueueCount} în coadă"
+                                else
+                                    "Mod online",
+                                tint = if (vm.isOfflineMode)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
 
                     var menuExpanded by remember { mutableStateOf(false) }
