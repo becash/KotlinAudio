@@ -17,6 +17,7 @@ class PlaylistStore {
         private const val FILE_NAME = "playlist.json"
         private const val MS_PER_MONTH = 30L * 24 * 60 * 60 * 1000
         private const val MAX_AGE_MONTHS = 12L
+        private val FILE_LOCK = Any()
     }
 
     private fun readJsonArray(context: Context): JSONArray {
@@ -62,6 +63,8 @@ class PlaylistStore {
         }
     }
 
+    // Scriere atomică: mai întâi în fișier temporar, apoi rename (atomic pe același filesystem).
+    // Previne citirea unui fișier parțial scris în caz de acces concurent sau crash.
     private fun writeJsonArray(context: Context, arr: JSONArray) {
         val dir = context.getExternalFilesDir(null) ?: run {
             Sentry.captureMessage("PlaylistStore: getExternalFilesDir=null la scriere playlist")
@@ -70,8 +73,15 @@ class PlaylistStore {
         val bareCount = (0 until arr.length()).count { i ->
             (arr.optJSONObject(i)?.length() ?: 0) <= 1
         }
+        val tmp = File(dir, "$FILE_NAME.tmp")
+        val target = File(dir, FILE_NAME)
+        val text = arr.toString(2).replace("\\/", "/")
         try {
-            File(dir, FILE_NAME).writeText(arr.toString(2).replace("\\/", "/"))
+            tmp.writeText(text)
+            if (!tmp.renameTo(target)) {
+                target.writeText(text)
+                runCatching { tmp.delete() }
+            }
             if (arr.length() > 0 && bareCount == arr.length()) {
                 Sentry.captureMessage(
                     "PlaylistStore: scris playlist cu DOAR ID-uri (${arr.length()} intrări, fără date îmbogățite)",
@@ -80,10 +90,11 @@ class PlaylistStore {
             }
         } catch (e: Exception) {
             Sentry.captureException(e)
+            runCatching { tmp.delete() }
         }
     }
 
-    fun loadAsMap(context: Context): Map<String, JSONObject> {
+    fun loadAsMap(context: Context): Map<String, JSONObject> = synchronized(FILE_LOCK) {
         val arr = readJsonArray(context)
         val result = mutableMapOf<String, JSONObject>()
         for (i in 0 until arr.length()) {
@@ -91,19 +102,19 @@ class PlaylistStore {
             val id = obj.optString("id").takeIf { it.isNotBlank() } ?: continue
             result[id] = obj
         }
-        return result
+        result
     }
 
-    fun load(context: Context, baseDir: String = ""): List<String> {
+    fun load(context: Context, baseDir: String = ""): List<String> = synchronized(FILE_LOCK) {
         val arr = readJsonArray(context)
-        return (0 until arr.length()).mapNotNull { i ->
+        (0 until arr.length()).mapNotNull { i ->
             val id = arr.optJSONObject(i)?.optString("id")?.takeIf { it.isNotBlank() }
                 ?: return@mapNotNull null
             if (baseDir.isNotEmpty()) "${baseDir.trimEnd('/')}/${id.trimStart('/')}" else id
         }
     }
 
-    fun loadWeightsMap(context: Context): Map<String, Double> {
+    fun loadWeightsMap(context: Context): Map<String, Double> = synchronized(FILE_LOCK) {
         val arr = readJsonArray(context)
         val result = mutableMapOf<String, Double>()
         for (i in 0 until arr.length()) {
@@ -112,10 +123,10 @@ class PlaylistStore {
             val weight = obj.optDouble("shuffle_weight", -1.0)
             if (weight >= 0) result[id] = weight
         }
-        return result
+        result
     }
 
-    fun zeroWeight(context: Context, songId: String) {
+    fun zeroWeight(context: Context, songId: String) = synchronized(FILE_LOCK) {
         val arr = readJsonArray(context)
         val normalizedId = if (songId.startsWith("/")) songId else "/$songId"
         for (i in 0 until arr.length()) {
@@ -128,7 +139,7 @@ class PlaylistStore {
         writeJsonArray(context, arr)
     }
 
-    fun save(context: Context, paths: List<String>, baseDir: String = "") {
+    fun save(context: Context, paths: List<String>, baseDir: String = "") = synchronized(FILE_LOCK) {
         Sentry.captureMessage(
             "PlaylistStore.save: salvare ${paths.size} căi ca ID-uri simple (fără date îmbogățite) | baseDir=${baseDir.ifBlank { "<none>" }}",
             SentryLevel.INFO
@@ -150,7 +161,7 @@ class PlaylistStore {
      *   - greutatea se dublează pentru fiecare lună (max 12) față de câmpul "updated"
      *   - se calculează și câmpul "completeness" (listen / duration×plays)
      */
-    fun saveEnriched(context: Context, ids: List<String>, infoMap: Map<String, JSONObject>) {
+    fun saveEnriched(context: Context, ids: List<String>, infoMap: Map<String, JSONObject>) = synchronized(FILE_LOCK) {
         if (ids.isNotEmpty() && infoMap.isEmpty()) {
             Sentry.captureMessage(
                 "PlaylistStore.saveEnriched: infoMap gol → playlist se va salva cu DOAR ID-uri | ids.size=${ids.size}",

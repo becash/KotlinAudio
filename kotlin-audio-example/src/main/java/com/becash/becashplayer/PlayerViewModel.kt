@@ -264,6 +264,11 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             }
             player.remove(deletedIndex)
             playlistItems = player.items
+            if (playlistItems.isNotEmpty()) {
+                val nextIndex = deletedIndex.coerceIn(0, playlistItems.lastIndex)
+                player.jumpToItem(nextIndex)
+                player.play()
+            }
             currentTrackIndex = player.currentIndex
             webDavSync.deleteFile(
                 serverUrl = appSettings.serverUrl,
@@ -280,9 +285,9 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         playlistMode = mode
         manualNextIndex = null
         when (mode) {
-            PlaylistMode.SHUFFLE  -> { player.playerOptions.repeatMode = RepeatMode.ALL; reloadPlayer() }
-            PlaylistMode.NORMAL   -> { player.playerOptions.repeatMode = RepeatMode.ALL; reloadPlayer() }
-            PlaylistMode.PLAY_ONE -> player.playerOptions.repeatMode = RepeatMode.ONE
+            PlaylistMode.SHUFFLE,
+            PlaylistMode.NORMAL   -> player.playerOptions.repeatMode = RepeatMode.ALL
+            PlaylistMode.PLAY_ONE,
             PlaylistMode.MANUAL   -> player.playerOptions.repeatMode = RepeatMode.ONE
         }
     }
