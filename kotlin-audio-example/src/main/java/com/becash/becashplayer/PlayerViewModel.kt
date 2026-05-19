@@ -67,11 +67,14 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     val audioBaseDir: String
         get() = File(Environment.getExternalStorageDirectory(), appSettings.localFolderName).absolutePath
 
+    // Sursa de adevăr pentru logică: player.items (live din ExoPlayer).
+    // playlistItems e o copie pentru UI Compose și nu trebuie folosită în logica de navigare.
+
     val ratingFilteredIndices: Set<Int>?
         get() {
             if (ratingFilter == RatingFilter.ALL) return null
             val base = audioBaseDir
-            return playlistItems.mapIndexedNotNull { idx, item ->
+            return player.items.mapIndexedNotNull { idx, item ->
                 val decoded = try { URLDecoder.decode(item.audioUrl, "UTF-8") } catch (_: Exception) { item.audioUrl }
                 val relPath = decoded.removePrefix("file://$base")
                 if (passesRatingFilter(relPath, songInfoMap, ratingFilter)) idx else null
@@ -80,7 +83,8 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
 
     val filteredIndices: List<Int>
         get() {
-            val indexed = playlistItems.mapIndexed { i, item -> i to item }
+            val items = player.items
+            val indexed = items.mapIndexed { i, item -> i to item }
             val ordered = if (playlistMode == PlaylistMode.SHUFFLE) indexed
                           else indexed.sortedWith(compareBy({ it.second.artist ?: "" }, { it.second.title ?: "" }))
             val afterText = if (filterQuery.isBlank()) ordered
@@ -179,20 +183,15 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                             }
                         }
                         PlaylistMode.SHUFFLE -> {
-                            // Queue-ul intern e deja amestecat de buildLocalAudioItems.
-                            // Avansăm în ordinea lui, sărind cântecele care nu trec filtrul.
-                            val size = player.items.size.coerceAtLeast(1)
                             val currentIdx = player.currentIndex
-                            val allowed = filteredIndices.toSet()
-                            val next = if (allowed.isEmpty()) {
+                            val fi = filteredIndices
+                            val next = if (fi.isEmpty()) {
+                                val size = player.items.size.coerceAtLeast(1)
                                 (currentIdx + 1) % size
                             } else {
-                                var found = -1
-                                for (i in 1..size) {
-                                    val candidate = (currentIdx + i) % size
-                                    if (candidate in allowed) { found = candidate; break }
-                                }
-                                if (found >= 0) found else allowed.first()
+                                val candidates = fi.filter { it != currentIdx }
+                                if (candidates.isEmpty()) fi.first()
+                                else candidates[Random.nextInt(candidates.size)]
                             }
                             player.pause()
                             player.jumpToItem(next)
@@ -266,9 +265,24 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             }
             return
         }
+        if (playlistMode == PlaylistMode.SHUFFLE) {
+            val cur = player.currentIndex
+            val fi = filteredIndices
+            val next = if (fi.isEmpty()) {
+                (cur + 1) % player.items.size.coerceAtLeast(1)
+            } else {
+                val candidates = fi.filter { it != cur }
+                if (candidates.isEmpty()) fi.first()
+                else candidates[Random.nextInt(candidates.size)]
+            }
+            player.jumpToItem(next)
+            player.play()
+            return
+        }
+        val cur = player.currentIndex
         val indices = filteredIndices
         if (indices.isEmpty()) { player.next(); return }
-        val pos = indices.indexOf(currentTrackIndex)
+        val pos = indices.indexOf(cur)
         val next = if (pos < 0 || pos >= indices.lastIndex) indices.first() else indices[pos + 1]
         player.jumpToItem(next)
         player.play()
@@ -279,9 +293,25 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             player.seek(0L, TimeUnit.MILLISECONDS)
             return
         }
+        if (playlistMode == PlaylistMode.SHUFFLE) {
+            val cur = player.currentIndex
+            val fi = filteredIndices
+            val prev = if (fi.isEmpty()) {
+                val size = player.items.size.coerceAtLeast(1)
+                (cur - 1 + size) % size
+            } else {
+                val candidates = fi.filter { it != cur }
+                if (candidates.isEmpty()) fi.first()
+                else candidates[Random.nextInt(candidates.size)]
+            }
+            player.jumpToItem(prev)
+            player.play()
+            return
+        }
+        val cur = player.currentIndex
         val indices = filteredIndices
         if (indices.isEmpty()) { player.previous(); return }
-        val pos = indices.indexOf(currentTrackIndex)
+        val pos = indices.indexOf(cur)
         val prev = if (pos <= 0) indices.last() else indices[pos - 1]
         player.jumpToItem(prev)
         player.play()
@@ -295,6 +325,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         val relativePath = localFile.toRelativeString(audioRootDir)
         val remoteFilePath = "${appSettings.remoteFolderPath.trimEnd('/')}/$relativePath"
         val deletedIndex = player.currentIndex
+        val wasPlaying = player.playerState == AudioPlayerState.PLAYING
 
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
@@ -306,9 +337,14 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             player.remove(deletedIndex)
             playlistItems = player.items
             if (playlistItems.isNotEmpty()) {
-                val nextIndex = deletedIndex.coerceIn(0, playlistItems.lastIndex)
+                val fi = filteredIndices
+                val nextIndex = when {
+                    fi.isEmpty() -> deletedIndex.coerceIn(0, playlistItems.lastIndex)
+                    playlistMode == PlaylistMode.SHUFFLE -> fi[Random.nextInt(fi.size)]
+                    else -> fi.firstOrNull { it >= deletedIndex } ?: fi.first()
+                }
                 player.jumpToItem(nextIndex)
-                player.play()
+                if (wasPlaying) player.play()
             }
             currentTrackIndex = player.currentIndex
             webDavSync.deleteFile(
@@ -363,6 +399,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun reloadPlayer() {
+        flushListen()
         val currentUrl = player.currentItem?.audioUrl
         val savedPosition = player.position
         val wasPlaying = player.playerState == AudioPlayerState.PLAYING
@@ -453,11 +490,17 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         val remaining = items.toMutableList()
         while (remaining.isNotEmpty()) {
             val totalWeight = remaining.sumOf { it.second }
-            var r = Random.nextDouble() * totalWeight
-            var selectedIdx = remaining.lastIndex
-            for (i in remaining.indices) {
-                r -= remaining[i].second
-                if (r <= 0.0) { selectedIdx = i; break }
+            val selectedIdx = if (totalWeight <= 0.0) {
+                // Toate greutățile sunt 0 — alegere uniform aleatoare
+                Random.nextInt(remaining.size)
+            } else {
+                var r = Random.nextDouble() * totalWeight
+                var idx = remaining.lastIndex
+                for (i in remaining.indices) {
+                    r -= remaining[i].second
+                    if (r <= 0.0) { idx = i; break }
+                }
+                idx
             }
             result.add(remaining[selectedIdx].first)
             remaining.removeAt(selectedIdx)

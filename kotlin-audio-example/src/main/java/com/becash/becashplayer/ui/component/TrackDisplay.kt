@@ -11,6 +11,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -84,9 +89,18 @@ fun TrackDisplay(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.width(4.dp))
+                var isSeeking by remember { mutableStateOf(false) }
+                var seekValue by remember { mutableFloatStateOf(0f) }
+                val sliderValue = if (isSeeking) seekValue
+                                  else if (duration == 0L) 0f
+                                  else position.toFloat() / duration.toFloat()
                 Slider(
-                    value = if (duration == 0L) 0f else position.toFloat() / duration.toFloat(),
-                    onValueChange = { onSeek((it * duration).toLong()) },
+                    value = sliderValue,
+                    onValueChange = { isSeeking = true; seekValue = it },
+                    onValueChangeFinished = {
+                        onSeek((seekValue * duration).toLong())
+                        isSeeking = false
+                    },
                     modifier = Modifier.weight(1f)
                 )
                 Spacer(modifier = Modifier.width(4.dp))

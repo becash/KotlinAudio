@@ -621,7 +621,6 @@ class MainActivity : ComponentActivity() {
                 delay(500L)
                 position = vm.player.position
                 duration = vm.player.duration
-                if (vm.player.duration > 0L && duration == 0L) duration = vm.player.duration
             }
         }
     }
