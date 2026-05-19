@@ -33,7 +33,10 @@ import java.io.File
 import java.net.URLDecoder
 import java.util.concurrent.TimeUnit
 import kotlin.random.Random
+import androidx.media3.common.util.UnstableApi
+import android.os.Build
 
+@UnstableApi
 class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
 
     val appSettings = AppSettings(app)
@@ -434,7 +437,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             val scanned = scanAudioFiles(audioDir)
             if (scanned.isEmpty()) {
                 Sentry.captureMessage(
-                    "buildLocalAudioItems: scanAudioFiles gol | dir=${audioDir.absolutePath} | exists=${audioDir.exists()} | canRead=${audioDir.canRead()} | isManageStorageGranted=${Environment.isExternalStorageManager()}"
+                    "buildLocalAudioItems: scanAudioFiles gol | dir=${audioDir.absolutePath} | exists=${audioDir.exists()} | canRead=${audioDir.canRead()} | isManageStorageGranted=${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Environment.isExternalStorageManager() else "n/a"}"
                 )
             } else {
                 val playlistFile = app.getExternalFilesDir(null)?.let { File(it, "playlist.json") }
