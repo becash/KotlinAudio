@@ -8,8 +8,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
-import android.provider.Settings
 import android.widget.Toast
+import androidx.core.net.toUri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,7 +17,6 @@ import androidx.activity.viewModels
 import androidx.core.view.WindowCompat
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -98,6 +97,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
+import androidx.media3.common.util.UnstableApi
 import com.doublesymmetry.kotlinaudio.models.AudioItem
 import com.doublesymmetry.kotlinaudio.models.AudioPlayerState
 import com.becash.becashplayer.ui.component.PlayerControls
@@ -106,12 +106,12 @@ import com.becash.becashplayer.ui.screen.SettingsScreen
 import com.becash.becashplayer.ui.theme.BecashPlayerTheme
 import com.becash.becashplayer.ext.toDurationString
 import org.json.JSONObject
-import timber.log.Timber
 import java.io.File
 import java.net.URLDecoder
 import java.util.concurrent.TimeUnit
 
 
+@UnstableApi
 class MainActivity : ComponentActivity() {
 
     private val viewModel: PlayerViewModel by viewModels()
@@ -141,7 +141,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            pendingCallNumber?.let { startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:$it"))) }
+            pendingCallNumber?.let { startActivity(Intent(Intent.ACTION_CALL, "tel:$it".toUri())) }
         } else {
             Toast.makeText(this, "Permisiunea de apel este necesară.", Toast.LENGTH_LONG).show()
         }
@@ -179,7 +179,7 @@ class MainActivity : ComponentActivity() {
     fun callPhone(number: String) {
         if (number.isBlank()) return
         if (checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-            startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:$number")))
+            startActivity(Intent(Intent.ACTION_CALL, "tel:$number".toUri()))
         } else {
             pendingCallNumber = number
             callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
@@ -213,7 +213,7 @@ class MainActivity : ComponentActivity() {
         val context = LocalContext.current
         val density = LocalDensity.current
         val screenHeightPx = remember {
-            val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val wm = context.getSystemService(WindowManager::class.java)!!
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 wm.maximumWindowMetrics.bounds.height()
             } else {
@@ -665,11 +665,11 @@ fun PlaylistView(
     onItemClick: (Int) -> Unit,
     filterQuery: String,
     filterInverted: Boolean,
+    modifier: Modifier = Modifier,
     songInfoByUrl: Map<String, JSONObject> = emptyMap(),
     allowedIndices: Set<Int>? = null,
     manualNextIndex: Int? = null,
     onItemLongClick: ((Int) -> Unit)? = null,
-    modifier: Modifier = Modifier,
 ) {
     val sorted = remember(items, allowedIndices) {
         items.mapIndexed { index, item -> index to item }

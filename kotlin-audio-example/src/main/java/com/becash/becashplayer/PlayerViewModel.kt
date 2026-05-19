@@ -1,7 +1,6 @@
 package com.becash.becashplayer
 
 import android.app.Application
-import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
@@ -435,7 +434,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             val scanned = scanAudioFiles(audioDir)
             if (scanned.isEmpty()) {
                 Sentry.captureMessage(
-                    "buildLocalAudioItems: scanAudioFiles gol | dir=${audioDir.absolutePath} | exists=${audioDir.exists()} | canRead=${audioDir.canRead()} | isManageStorageGranted=${android.os.Environment.isExternalStorageManager()}"
+                    "buildLocalAudioItems: scanAudioFiles gol | dir=${audioDir.absolutePath} | exists=${audioDir.exists()} | canRead=${audioDir.canRead()} | isManageStorageGranted=${Environment.isExternalStorageManager()}"
                 )
             } else {
                 val playlistFile = app.getExternalFilesDir(null)?.let { File(it, "playlist.json") }
