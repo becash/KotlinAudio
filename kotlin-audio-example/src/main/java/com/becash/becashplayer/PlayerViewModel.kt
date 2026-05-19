@@ -108,7 +108,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 handleAudioFocus = true
             )
         )
-        player.playerOptions.repeatMode = RepeatMode.ALL
+        player.playerOptions.repeatMode = RepeatMode.ONE
         setupNotification()
 
         viewModelScope.launch(Dispatchers.IO) {
@@ -154,6 +154,69 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                         playlistStore.zeroWeight(app, justPlayedSongId)
                     }
                 }
+
+                // Cântecul s-a terminat — ExoPlayer a repetat prin RepeatMode.ONE.
+                // Noi decidem ce urmează, fără ca vreun cântec greșit să cânte.
+                if (reason is AudioItemTransitionReason.REPEAT) {
+                    when (playlistMode) {
+                        PlaylistMode.PLAY_ONE -> {
+                            // intenționat: repetă același cântec, actualizăm doar listen tracking
+                            val base = audioBaseDir
+                            listenSongId = player.currentItem?.audioUrl
+                                ?.let { url -> try { URLDecoder.decode(url, "UTF-8") } catch (_: Exception) { url } }
+                                ?.removePrefix("file://$base")
+                                ?.let { if (it.startsWith("/")) it else "/$it" }
+                        }
+                        PlaylistMode.MANUAL -> {
+                            val nextIdx = manualNextIndex
+                            if (nextIdx != null) {
+                                manualNextIndex = null
+                                player.pause()
+                                player.jumpToItem(nextIdx)
+                                player.play()
+                            } else {
+                                player.pause()
+                            }
+                        }
+                        PlaylistMode.SHUFFLE -> {
+                            // Queue-ul intern e deja amestecat de buildLocalAudioItems.
+                            // Avansăm în ordinea lui, sărind cântecele care nu trec filtrul.
+                            val size = player.items.size.coerceAtLeast(1)
+                            val currentIdx = player.currentIndex
+                            val allowed = filteredIndices.toSet()
+                            val next = if (allowed.isEmpty()) {
+                                (currentIdx + 1) % size
+                            } else {
+                                var found = -1
+                                for (i in 1..size) {
+                                    val candidate = (currentIdx + i) % size
+                                    if (candidate in allowed) { found = candidate; break }
+                                }
+                                if (found >= 0) found else allowed.first()
+                            }
+                            player.pause()
+                            player.jumpToItem(next)
+                            player.play()
+                        }
+                        PlaylistMode.NORMAL -> {
+                            // fi e sortat după artist/titlu — urmărim exact acea ordine.
+                            val fi = filteredIndices
+                            val pos = fi.indexOf(player.currentIndex)
+                            val next = when {
+                                fi.isEmpty() -> (player.currentIndex + 1) % player.items.size.coerceAtLeast(1)
+                                pos >= 0     -> fi[(pos + 1) % fi.size]
+                                else         -> fi.first()
+                            }
+                            player.pause()
+                            player.jumpToItem(next)
+                            player.play()
+                        }
+                    }
+                    return@onEach
+                }
+
+                // Tranziție programatică (jumpToItem din next/previous/delete/loadAndPlay etc.)
+                // Actualizăm starea UI și înregistrăm play-ul pentru cântecul nou.
                 val base = audioBaseDir
                 val currentSongId = player.currentItem?.audioUrl
                     ?.let { url -> try { URLDecoder.decode(url, "UTF-8") } catch (_: Exception) { url } }
@@ -161,29 +224,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                     ?.let { url -> if (url.startsWith("/")) url else "/$url" }
                 listenSongId = currentSongId
 
-                // MANUAL: trebuie interceptat înainte de orice logică de filtrare
-                if (playlistMode == PlaylistMode.MANUAL && reason is AudioItemTransitionReason.REPEAT) {
-                    val nextIdx = manualNextIndex
-                    if (nextIdx != null) {
-                        manualNextIndex = null
-                        player.jumpToItem(nextIdx)
-                        player.play()
-                    } else {
-                        player.pause()
-                    }
-                    return@onEach
-                }
-
-                val newIndex = player.currentIndex
-                val fi = filteredIndices
-                if ((filterQuery.isNotBlank() || ratingFilter != RatingFilter.ALL) && fi.isNotEmpty() && newIndex !in fi) {
-                    val next = fi.firstOrNull { it > newIndex } ?: fi.first()
-                    player.jumpToItem(next)
-                    player.play()
-                    return@onEach
-                }
-
-                currentTrackIndex = newIndex
+                currentTrackIndex = player.currentIndex
                 playlistItems = player.items
                 listenDuration = player.currentItem?.duration ?: 0L
 
@@ -286,7 +327,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         manualNextIndex = null
         when (mode) {
             PlaylistMode.SHUFFLE,
-            PlaylistMode.NORMAL   -> player.playerOptions.repeatMode = RepeatMode.ALL
+            PlaylistMode.NORMAL,
             PlaylistMode.PLAY_ONE,
             PlaylistMode.MANUAL   -> player.playerOptions.repeatMode = RepeatMode.ONE
         }
