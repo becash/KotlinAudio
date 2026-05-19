@@ -32,8 +32,8 @@ fun TrackDisplay(
     position: Long,
     duration: Long,
     isLive: Boolean,
-    trackLabel: String = "",
     modifier: Modifier = Modifier,
+    trackLabel: String = "",
     onSeek: (Long) -> Unit = {},
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
