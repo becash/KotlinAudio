@@ -45,6 +45,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // S22 Ultra (și orice telefon modern) e doar arm64-v8a. Restul ABI-urilor
+            // din media3/ExoPlayer sunt balast în APK-ul de release. Debug rămâne
+            // universal ca să meargă pe emulator (x86_64).
+            ndk {
+                abiFilters += "arm64-v8a"
+            }
         }
     }
     compileOptions {

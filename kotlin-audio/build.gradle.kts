@@ -42,13 +42,13 @@ dependencies {
     implementation("androidx.media:media:1.7.0")
 
     // Media3 — înlocuiește ExoPlayer 2.x
-    api("androidx.media3:media3-exoplayer:1.3.1")
-    api("androidx.media3:media3-exoplayer-dash:1.3.1")
-    api("androidx.media3:media3-exoplayer-hls:1.3.1")
-    api("androidx.media3:media3-exoplayer-smoothstreaming:1.3.1")
-    api("androidx.media3:media3-session:1.3.1")
-    api("androidx.media3:media3-ui:1.3.1")
-    api("androidx.media3:media3-datasource:1.3.1")
+    api("androidx.media3:media3-exoplayer:1.4.1")
+    api("androidx.media3:media3-exoplayer-dash:1.4.1")
+    api("androidx.media3:media3-exoplayer-hls:1.4.1")
+    api("androidx.media3:media3-exoplayer-smoothstreaming:1.4.1")
+    api("androidx.media3:media3-session:1.4.1")
+    api("androidx.media3:media3-ui:1.4.1")
+    api("androidx.media3:media3-datasource:1.4.1")
     api("com.jakewharton.timber:timber:5.0.1")
 
     implementation("androidx.test:rules:1.5.0")
