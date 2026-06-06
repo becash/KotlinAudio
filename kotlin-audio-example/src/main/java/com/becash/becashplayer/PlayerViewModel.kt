@@ -129,7 +129,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         player.event.playbackError
             .onEach { error ->
                 Timber.e("Eroare redare (${error.code}): ${error.message} — se trece la piesa următoare")
-                Sentry.captureMessage("Playback error cod=${error.code}: ${error.message} | piesa=${player.currentItem?.audioUrl}")
+                showToast("Eroare redare (${error.code}): ${error.message}", Toast.LENGTH_LONG)
                 player.next()
             }
             .launchIn(viewModelScope)
