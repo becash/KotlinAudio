@@ -1,4 +1,4 @@
-package com.becash.becashplayer
+package com.becash.becashplayer.data
 
 import android.util.Base64
 import android.util.Xml

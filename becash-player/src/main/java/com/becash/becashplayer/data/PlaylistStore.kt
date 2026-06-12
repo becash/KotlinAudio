@@ -1,4 +1,4 @@
-package com.becash.becashplayer
+package com.becash.becashplayer.data
 
 import android.content.Context
 import android.os.Environment
@@ -135,20 +135,6 @@ class PlaylistStore {
                 obj.put("shuffle_weight", 0.0)
                 break
             }
-        }
-        writeJsonArray(context, arr)
-    }
-
-    fun save(context: Context, paths: List<String>, baseDir: String = "") = synchronized(FILE_LOCK) {
-        Sentry.captureMessage(
-            "PlaylistStore.save: salvare ${paths.size} căi ca ID-uri simple (fără date îmbogățite) | baseDir=${baseDir.ifBlank { "<none>" }}",
-            SentryLevel.INFO
-        )
-        val arr = JSONArray()
-        val prefix = if (baseDir.isNotEmpty()) "${baseDir.trimEnd('/')}/" else ""
-        paths.forEach { path ->
-            val id = if (prefix.isNotEmpty()) path.removePrefix(prefix) else path
-            arr.put(JSONObject().put("id", id))
         }
         writeJsonArray(context, arr)
     }

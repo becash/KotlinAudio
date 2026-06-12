@@ -1,4 +1,4 @@
-package com.becash.becashplayer
+package com.becash.becashplayer.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -38,21 +38,24 @@ class DbSync {
                 "&useUnicode=true&characterEncoding=UTF-8"
     }
 
-    suspend fun sync(
-        host: String,
-        port: Int,
-        user: String,
-        password: String,
-        database: String,
-    ): Map<String, JSONObject> = withContext(Dispatchers.IO) {
-        val conn = try {
-            withRetry { DriverManager.getConnection(buildConnectionUrl(host, port), user, password) }
-        } catch (e: Exception) {
-            Timber.w("DbSync: sync skipped — ${e.message}")
-            return@withContext emptyMap()
+    // Conexiune cu retry pe baza setărilor MySQL; null dacă nu se poate conecta.
+    private suspend fun connect(settings: AppSettings, useDatabase: Boolean, op: String) = try {
+        withRetry {
+            DriverManager.getConnection(
+                buildConnectionUrl(settings.mysqlHost, settings.mysqlPort, if (useDatabase) settings.mysqlDatabase else ""),
+                settings.mysqlUser, settings.mysqlPassword
+            )
         }
-        conn.use { conn ->
-            conn.createStatement().use { stmt ->
+    } catch (e: Exception) {
+        Timber.w("DbSync: $op skipped — ${e.message}")
+        null
+    }
+
+    suspend fun sync(settings: AppSettings): Map<String, JSONObject> = withContext(Dispatchers.IO) {
+        val conn = connect(settings, useDatabase = false, op = "sync") ?: return@withContext emptyMap()
+        val database = settings.mysqlDatabase
+        conn.use { c ->
+            c.createStatement().use { stmt ->
                 stmt.execute("CREATE DATABASE IF NOT EXISTS `$database` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
                 stmt.execute("USE `$database`")
                 stmt.execute("""
@@ -86,20 +89,8 @@ class DbSync {
         }
     }
 
-    suspend fun incrementPlays(
-        host: String,
-        port: Int,
-        user: String,
-        password: String,
-        database: String,
-        songId: String,
-    ) = withContext(Dispatchers.IO) {
-        val conn = try {
-            withRetry { DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password) }
-        } catch (e: Exception) {
-            Timber.w("DbSync: incrementPlays skipped — ${e.message}")
-            return@withContext
-        }
+    suspend fun incrementPlays(settings: AppSettings, songId: String) = withContext(Dispatchers.IO) {
+        val conn = connect(settings, useDatabase = true, op = "incrementPlays") ?: return@withContext
         conn.use {
             it.prepareStatement(
                 "INSERT INTO played (id, plays) VALUES (?, 1) ON DUPLICATE KEY UPDATE plays = plays + 1"
@@ -112,21 +103,12 @@ class DbSync {
     }
 
     suspend fun addListen(
-        host: String,
-        port: Int,
-        user: String,
-        password: String,
-        database: String,
+        settings: AppSettings,
         songId: String,
         milliseconds: Long,
         duration: Long,
     ) = withContext(Dispatchers.IO) {
-        val conn = try {
-            withRetry { DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password) }
-        } catch (e: Exception) {
-            Timber.w("DbSync: addListen skipped — ${e.message}")
-            return@withContext
-        }
+        val conn = connect(settings, useDatabase = true, op = "addListen") ?: return@withContext
         conn.use {
             it.prepareStatement(
                 "INSERT INTO played (id, listen, duration) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE listen = listen + ?, duration = IF(duration = 0, VALUES(duration), duration)"
@@ -142,22 +124,13 @@ class DbSync {
     }
 
     suspend fun setRateDance(
-        host: String,
-        port: Int,
-        user: String,
-        password: String,
-        database: String,
+        settings: AppSettings,
         songId: String,
         rate: Int,
         dance: Boolean,
         calm: Boolean,
     ) = withContext(Dispatchers.IO) {
-        val conn = try {
-            withRetry { DriverManager.getConnection(buildConnectionUrl(host, port, database), user, password) }
-        } catch (e: Exception) {
-            Timber.w("DbSync: setRateDance skipped — ${e.message}")
-            return@withContext
-        }
+        val conn = connect(settings, useDatabase = true, op = "setRateDance") ?: return@withContext
         conn.use {
             it.prepareStatement(
                 "INSERT INTO played (id, rate, dance, calm) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE rate = ?, dance = ?, calm = ?"

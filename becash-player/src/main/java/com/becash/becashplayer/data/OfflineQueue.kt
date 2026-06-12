@@ -1,4 +1,4 @@
-package com.becash.becashplayer
+package com.becash.becashplayer.data
 
 import android.content.Context
 import org.json.JSONArray
@@ -16,7 +16,7 @@ class OfflineQueue(private val context: Context) {
 
     private fun file(): File? = context.getExternalFilesDir(null)?.let { File(it, FILE_NAME) }
 
-    fun readArray(): JSONArray {
+    private fun readArray(): JSONArray {
         val f = file() ?: return JSONArray()
         if (!f.exists()) return JSONArray()
         return try { JSONArray(f.readText()) } catch (_: Exception) { JSONArray() }
@@ -72,24 +72,15 @@ class OfflineQueue(private val context: Context) {
             val op = arr.optJSONObject(i) ?: continue
             try {
                 when (op.optString("type")) {
-                    TYPE_INCREMENT_PLAYS -> dbSync.incrementPlays(
-                        host = settings.mysqlHost, port = settings.mysqlPort,
-                        user = settings.mysqlUser, password = settings.mysqlPassword,
-                        database = settings.mysqlDatabase,
-                        songId = op.optString("songId"),
-                    )
+                    TYPE_INCREMENT_PLAYS -> dbSync.incrementPlays(settings, op.optString("songId"))
                     TYPE_ADD_LISTEN -> dbSync.addListen(
-                        host = settings.mysqlHost, port = settings.mysqlPort,
-                        user = settings.mysqlUser, password = settings.mysqlPassword,
-                        database = settings.mysqlDatabase,
+                        settings,
                         songId = op.optString("songId"),
                         milliseconds = op.optLong("milliseconds"),
                         duration = op.optLong("duration"),
                     )
                     TYPE_SET_RATE_DANCE -> dbSync.setRateDance(
-                        host = settings.mysqlHost, port = settings.mysqlPort,
-                        user = settings.mysqlUser, password = settings.mysqlPassword,
-                        database = settings.mysqlDatabase,
+                        settings,
                         songId = op.optString("songId"),
                         rate = op.optInt("rate"),
                         dance = op.optInt("dance") == 1,

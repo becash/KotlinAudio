@@ -1,4 +1,4 @@
-package com.becash.becashplayer
+package com.becash.becashplayer.data
 
 sealed class SyncState {
     object Idle : SyncState()

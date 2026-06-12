@@ -1,4 +1,4 @@
-package com.becash.becashplayer
+package com.becash.becashplayer.ui.screen
 
 import android.media.MediaMetadataRetriever
 import android.os.Build
@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.becash.becashplayer.ext.toDurationString
+import com.becash.becashplayer.optFlag
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -145,9 +146,7 @@ fun TrackInfoDialog(
                             val rate = songInfo.optInt("rate", 0)
                             if (rate > 0) InfoRow("Apreciere", "$rate / 5")
 
-                            val dance = songInfo.opt("dance")
-                                .let { it == true || it == 1 || it?.toString() == "1" }
-                            if (dance) InfoRow("Muzică dans", "da")
+                            if (songInfo.optFlag("dance")) InfoRow("Muzică dans", "da")
 
                             val completeness = songInfo.optDouble("completeness", -1.0)
                             if (completeness >= 0)

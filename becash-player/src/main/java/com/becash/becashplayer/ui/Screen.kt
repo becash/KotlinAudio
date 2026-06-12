@@ -1,4 +1,4 @@
-package com.becash.becashplayer
+package com.becash.becashplayer.ui
 
 sealed class Screen {
     object Main : Screen()

@@ -1,6 +1,7 @@
-package com.becash.becashplayer
+package com.becash.becashplayer.data
 
 import android.content.Context
+import com.becash.becashplayer.BuildConfig
 import io.sentry.Sentry
 import org.json.JSONObject
 import java.io.File
@@ -122,6 +123,8 @@ class AppSettings(context: Context) {
     fun isWebDavConfigured(): Boolean =
         serverUrl.isNotBlank() && username.isNotBlank() && password.isNotBlank()
 
+    fun isMysqlConfigured(): Boolean = mysqlHost.isNotBlank()
+
     companion object {
         private const val KEY_SERVER_URL       = "server_url"
         private const val KEY_USERNAME         = "username"
@@ -142,9 +145,6 @@ class AppSettings(context: Context) {
         private const val KEY_BARIERA9         = "bariera9"
         private const val KEY_BARIERA10        = "bariera10"
         private const val KEY_OFFLINE_MODE     = "offline_mode"
-
-        val BARIERA9  get() = BuildConfig.BARIERA9
-        val BARIERA10 get() = BuildConfig.BARIERA10
 
         private val DEFAULT_SERVER_URL      get() = BuildConfig.DEFAULT_SERVER_URL
         private val DEFAULT_USERNAME        get() = BuildConfig.DEFAULT_USERNAME

@@ -2,6 +2,7 @@ package com.becash.becashplayer
 
 import android.app.Application
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.widget.Toast
 import androidx.compose.runtime.getValue
@@ -9,6 +10,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.util.UnstableApi
+import com.becash.becashplayer.data.AUDIO_EXTENSIONS
+import com.becash.becashplayer.data.AppSettings
+import com.becash.becashplayer.data.DbSync
+import com.becash.becashplayer.data.OfflineQueue
+import com.becash.becashplayer.data.PlaylistStore
+import com.becash.becashplayer.data.SyncState
+import com.becash.becashplayer.data.WebDavSync
+import com.becash.becashplayer.ui.Screen
 import com.doublesymmetry.kotlinaudio.models.AudioItem
 import com.doublesymmetry.kotlinaudio.models.AudioItemTransitionReason
 import com.doublesymmetry.kotlinaudio.models.AudioPlayerState
@@ -20,21 +30,19 @@ import com.doublesymmetry.kotlinaudio.models.NotificationConfig
 import com.doublesymmetry.kotlinaudio.models.PlayerConfig
 import com.doublesymmetry.kotlinaudio.models.RepeatMode
 import com.doublesymmetry.kotlinaudio.players.QueuedAudioPlayer
+import io.sentry.Sentry
+import io.sentry.SentryLevel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import io.sentry.Sentry
-import io.sentry.SentryLevel
 import timber.log.Timber
 import java.io.File
 import java.net.URLDecoder
 import java.util.concurrent.TimeUnit
 import kotlin.random.Random
-import androidx.media3.common.util.UnstableApi
-import android.os.Build
 
 @UnstableApi
 class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
@@ -72,23 +80,32 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     // Sursa de adevăr pentru logică: player.items (live din ExoPlayer).
     // playlistItems e o copie pentru UI Compose și nu trebuie folosită în logica de navigare.
 
+    /** ID-ul cântecului (cheia din playlist.json/MySQL) derivat din URL-ul audio. */
+    private fun songIdOf(url: String?): String? {
+        url ?: return null
+        val decoded = try { URLDecoder.decode(url, "UTF-8") } catch (_: Exception) { url }
+        val rel = decoded.removePrefix("file://$audioBaseDir")
+        return if (rel.startsWith("/")) rel else "/$rel"
+    }
+
+    /** ID-ul cântecului curent — folosit de UI pentru songInfoMap și de statistici. */
+    val currentSongId: String?
+        get() = songIdOf(player.currentItem?.audioUrl)
+
     val ratingFilteredIndices: Set<Int>?
         get() {
             if (ratingFilter == RatingFilter.ALL) return null
-            val base = audioBaseDir
             return player.items.mapIndexedNotNull { idx, item ->
-                val decoded = try { URLDecoder.decode(item.audioUrl, "UTF-8") } catch (_: Exception) { item.audioUrl }
-                val relPath = decoded.removePrefix("file://$base")
-                if (passesRatingFilter(relPath, songInfoMap, ratingFilter)) idx else null
+                val songId = songIdOf(item.audioUrl) ?: return@mapIndexedNotNull null
+                if (passesRatingFilter(songId, songInfoMap, ratingFilter)) idx else null
             }.toSet()
         }
 
     val filteredIndices: List<Int>
         get() {
-            val items = player.items
-            val indexed = items.mapIndexed { i, item -> i to item }
+            val indexed = player.items.mapIndexed { i, item -> i to item }
             val ordered = if (playlistMode == PlaylistMode.SHUFFLE) indexed
-                          else indexed.sortedWith(compareBy({ it.second.artist ?: "" }, { it.second.title ?: "" }))
+                          else indexed.sortedWith(compareBy(byArtistTitle) { it.second })
             val afterText = if (filterQuery.isBlank()) ordered
                             else ordered.filter { (_, item) -> matchesTextFilter(item, filterQuery, filterInverted) }
             val allowed = ratingFilteredIndices
@@ -152,171 +169,128 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             .launchIn(viewModelScope)
 
         player.event.audioItemTransition
-            .onEach { reason ->
-                val justPlayedSongId = listenSongId
-                flushListen()
-                if (justPlayedSongId != null) {
-                    viewModelScope.launch(Dispatchers.IO) {
-                        playlistStore.zeroWeight(app, justPlayedSongId)
-                    }
-                }
-
-                // Cântecul s-a terminat — ExoPlayer a repetat prin RepeatMode.ONE.
-                // Noi decidem ce urmează, fără ca vreun cântec greșit să cânte.
-                if (reason is AudioItemTransitionReason.REPEAT) {
-                    when (playlistMode) {
-                        PlaylistMode.PLAY_ONE -> {
-                            // intenționat: repetă același cântec, actualizăm doar listen tracking
-                            val base = audioBaseDir
-                            listenSongId = player.currentItem?.audioUrl
-                                ?.let { url -> try { URLDecoder.decode(url, "UTF-8") } catch (_: Exception) { url } }
-                                ?.removePrefix("file://$base")
-                                ?.let { if (it.startsWith("/")) it else "/$it" }
-                        }
-                        PlaylistMode.MANUAL -> {
-                            val nextIdx = manualNextIndex
-                            if (nextIdx != null) {
-                                manualNextIndex = null
-                                player.pause()
-                                player.jumpToItem(nextIdx)
-                                player.play()
-                            } else {
-                                player.pause()
-                            }
-                        }
-                        PlaylistMode.SHUFFLE -> {
-                            val currentIdx = player.currentIndex
-                            val fi = filteredIndices
-                            val next = if (fi.isEmpty()) {
-                                val size = player.items.size.coerceAtLeast(1)
-                                (currentIdx + 1) % size
-                            } else {
-                                val candidates = fi.filter { it != currentIdx }
-                                if (candidates.isEmpty()) fi.first()
-                                else candidates[Random.nextInt(candidates.size)]
-                            }
-                            player.pause()
-                            player.jumpToItem(next)
-                            player.play()
-                        }
-                        PlaylistMode.NORMAL -> {
-                            // fi e sortat după artist/titlu — urmărim exact acea ordine.
-                            val fi = filteredIndices
-                            val pos = fi.indexOf(player.currentIndex)
-                            val next = when {
-                                fi.isEmpty() -> (player.currentIndex + 1) % player.items.size.coerceAtLeast(1)
-                                pos >= 0     -> fi[(pos + 1) % fi.size]
-                                else         -> fi.first()
-                            }
-                            player.pause()
-                            player.jumpToItem(next)
-                            player.play()
-                        }
-                    }
-                    return@onEach
-                }
-
-                // Tranziție programatică (jumpToItem din next/previous/delete/loadAndPlay etc.)
-                // Actualizăm starea UI și înregistrăm play-ul pentru cântecul nou.
-                val base = audioBaseDir
-                val currentSongId = player.currentItem?.audioUrl
-                    ?.let { url -> try { URLDecoder.decode(url, "UTF-8") } catch (_: Exception) { url } }
-                    ?.removePrefix("file://$base")
-                    ?.let { url -> if (url.startsWith("/")) url else "/$url" }
-                listenSongId = currentSongId
-
-                currentTrackIndex = player.currentIndex
-                playlistItems = player.items
-                listenDuration = player.currentItem?.duration ?: 0L
-
-                if (currentSongId != null && appSettings.mysqlHost.isNotBlank()) {
-                    viewModelScope.launch(Dispatchers.IO) {
-                        try {
-                            if (isOfflineMode) {
-                                offlineQueue.enqueueIncrementPlays(currentSongId)
-                                offlineQueueCount = offlineQueue.count()
-                            } else {
-                                dbSync.incrementPlays(
-                                    host = appSettings.mysqlHost,
-                                    port = appSettings.mysqlPort,
-                                    user = appSettings.mysqlUser,
-                                    password = appSettings.mysqlPassword,
-                                    database = appSettings.mysqlDatabase,
-                                    songId = currentSongId,
-                                )
-                            }
-                        } catch (e: Exception) {
-                            Timber.e(e, "incrementPlays error")
-                            Sentry.captureException(e)
-                            offlineQueue.enqueueIncrementPlays(currentSongId)
-                            offlineQueueCount = offlineQueue.count()
-                        }
-                    }
-                }
-            }
+            .onEach { reason -> handleItemTransition(reason) }
             .launchIn(viewModelScope)
     }
 
+    private fun handleItemTransition(reason: AudioItemTransitionReason?) {
+        val justPlayedSongId = listenSongId
+        flushListen()
+        if (justPlayedSongId != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                playlistStore.zeroWeight(app, justPlayedSongId)
+            }
+        }
+
+        // Cântecul s-a terminat — ExoPlayer a repetat prin RepeatMode.ONE.
+        // Noi decidem ce urmează, fără ca vreun cântec greșit să cânte.
+        if (reason is AudioItemTransitionReason.REPEAT) {
+            when (playlistMode) {
+                PlaylistMode.PLAY_ONE -> {
+                    // intenționat: repetă același cântec, actualizăm doar listen tracking
+                    listenSongId = currentSongId
+                }
+                PlaylistMode.MANUAL -> {
+                    val nextIdx = manualNextIndex
+                    if (nextIdx != null) {
+                        manualNextIndex = null
+                        player.pause()
+                        player.jumpToItem(nextIdx)
+                        player.play()
+                    } else {
+                        player.pause()
+                    }
+                }
+                PlaylistMode.SHUFFLE -> {
+                    player.pause()
+                    player.jumpToItem(pickShuffle() ?: fallbackNextIndex())
+                    player.play()
+                }
+                PlaylistMode.NORMAL -> {
+                    player.pause()
+                    player.jumpToItem(pickSequential(+1) ?: fallbackNextIndex())
+                    player.play()
+                }
+            }
+            return
+        }
+
+        // Tranziție programatică (jumpToItem din next/previous/delete/loadAndPlay etc.)
+        // Actualizăm starea UI și înregistrăm play-ul pentru cântecul nou.
+        val songId = currentSongId
+        listenSongId = songId
+        currentTrackIndex = player.currentIndex
+        playlistItems = player.items
+        listenDuration = player.currentItem?.duration ?: 0L
+
+        if (songId != null) {
+            recordStat(
+                label = "incrementPlays",
+                enqueue = { offlineQueue.enqueueIncrementPlays(songId) },
+                send = { dbSync.incrementPlays(appSettings, songId) },
+            )
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Navigare în playlist — alegerea indexului următor, o singură implementare
+    // ---------------------------------------------------------------------
+
+    /** Index aleator din lista filtrată, diferit de cel curent; null dacă filtrul e gol. */
+    private fun pickShuffle(): Int? {
+        val fi = filteredIndices
+        if (fi.isEmpty()) return null
+        val candidates = fi.filter { it != player.currentIndex }
+        return if (candidates.isEmpty()) fi.first()
+               else candidates[Random.nextInt(candidates.size)]
+    }
+
+    /** Indexul următor/precedent din lista filtrată (cu wrap-around); null dacă filtrul e gol. */
+    private fun pickSequential(offset: Int): Int? {
+        val fi = filteredIndices
+        if (fi.isEmpty()) return null
+        val pos = fi.indexOf(player.currentIndex)
+        return if (pos < 0) (if (offset > 0) fi.first() else fi.last())
+               else fi[(pos + offset).mod(fi.size)]
+    }
+
+    private fun fallbackNextIndex(): Int =
+        (player.currentIndex + 1) % player.items.size.coerceAtLeast(1)
+
     fun nextFiltered() {
-        if (playlistMode == PlaylistMode.MANUAL) {
-            val nextIdx = manualNextIndex
-            if (nextIdx != null) {
+        when (playlistMode) {
+            PlaylistMode.MANUAL -> {
+                val nextIdx = manualNextIndex ?: return
                 manualNextIndex = null
                 player.jumpToItem(nextIdx)
                 player.play()
             }
-            return
-        }
-        if (playlistMode == PlaylistMode.SHUFFLE) {
-            val cur = player.currentIndex
-            val fi = filteredIndices
-            val next = if (fi.isEmpty()) {
-                (cur + 1) % player.items.size.coerceAtLeast(1)
-            } else {
-                val candidates = fi.filter { it != cur }
-                if (candidates.isEmpty()) fi.first()
-                else candidates[Random.nextInt(candidates.size)]
+            PlaylistMode.SHUFFLE -> {
+                player.jumpToItem(pickShuffle() ?: fallbackNextIndex())
+                player.play()
             }
-            player.jumpToItem(next)
-            player.play()
-            return
+            else -> {
+                val next = pickSequential(+1) ?: run { player.next(); return }
+                player.jumpToItem(next)
+                player.play()
+            }
         }
-        val cur = player.currentIndex
-        val indices = filteredIndices
-        if (indices.isEmpty()) { player.next(); return }
-        val pos = indices.indexOf(cur)
-        val next = if (pos < 0 || pos >= indices.lastIndex) indices.first() else indices[pos + 1]
-        player.jumpToItem(next)
-        player.play()
     }
 
     fun previousFiltered() {
-        if (playlistMode == PlaylistMode.MANUAL) {
-            player.seek(0L, TimeUnit.MILLISECONDS)
-            return
-        }
-        if (playlistMode == PlaylistMode.SHUFFLE) {
-            val cur = player.currentIndex
-            val fi = filteredIndices
-            val prev = if (fi.isEmpty()) {
+        when (playlistMode) {
+            PlaylistMode.MANUAL -> player.seek(0L, TimeUnit.MILLISECONDS)
+            PlaylistMode.SHUFFLE -> {
                 val size = player.items.size.coerceAtLeast(1)
-                (cur - 1 + size) % size
-            } else {
-                val candidates = fi.filter { it != cur }
-                if (candidates.isEmpty()) fi.first()
-                else candidates[Random.nextInt(candidates.size)]
+                player.jumpToItem(pickShuffle() ?: (player.currentIndex - 1 + size) % size)
+                player.play()
             }
-            player.jumpToItem(prev)
-            player.play()
-            return
+            else -> {
+                val prev = pickSequential(-1) ?: run { player.previous(); return }
+                player.jumpToItem(prev)
+                player.play()
+            }
         }
-        val cur = player.currentIndex
-        val indices = filteredIndices
-        if (indices.isEmpty()) { player.previous(); return }
-        val pos = indices.indexOf(cur)
-        val prev = if (pos <= 0) indices.last() else indices[pos - 1]
-        player.jumpToItem(prev)
-        player.play()
     }
 
     fun deleteCurrentTrack() {
@@ -363,12 +337,9 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         appSettings.lastPlaylistMode = mode.name
         playlistMode = mode
         manualNextIndex = null
-        when (mode) {
-            PlaylistMode.SHUFFLE,
-            PlaylistMode.NORMAL,
-            PlaylistMode.PLAY_ONE,
-            PlaylistMode.MANUAL   -> player.playerOptions.repeatMode = RepeatMode.ONE
-        }
+        // Toate modurile rulează cu RepeatMode.ONE: tranziția REPEAT e semnalul că piesa
+        // s-a terminat, iar noi alegem următoarea (vezi handleItemTransition).
+        player.playerOptions.repeatMode = RepeatMode.ONE
     }
 
     fun loadAndPlay() {
@@ -408,11 +379,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val items = withContext(Dispatchers.IO) {
                 if (playlistMode == PlaylistMode.SHUFFLE && currentUrl != null) {
-                    val base = audioBaseDir
-                    val decoded = try { URLDecoder.decode(currentUrl, "UTF-8") } catch (_: Exception) { currentUrl }
-                    val songId = decoded.removePrefix("file://$base")
-                        .let { if (it.startsWith("/")) it else "/$it" }
-                    playlistStore.zeroWeight(app, songId)
+                    songIdOf(currentUrl)?.let { playlistStore.zeroWeight(app, it) }
                 }
                 buildLocalAudioItems()
             }
@@ -519,6 +486,33 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             .toList()
     }
 
+    // ---------------------------------------------------------------------
+    // Statistici (MySQL sau coadă offline) — un singur loc pentru dispatch
+    // ---------------------------------------------------------------------
+
+    /**
+     * Rulează o operație de statistici: în mod offline o pune în coadă, altfel
+     * o trimite la MySQL; la eroare cade înapoi pe coada offline.
+     */
+    private fun recordStat(label: String, enqueue: () -> Unit, send: suspend () -> Unit) {
+        if (!appSettings.isMysqlConfigured()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (isOfflineMode) {
+                    enqueue()
+                    offlineQueueCount = offlineQueue.count()
+                } else {
+                    send()
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "$label error")
+                Sentry.captureException(e)
+                enqueue()
+                offlineQueueCount = offlineQueue.count()
+            }
+        }
+    }
+
     fun flushListen() {
         if (listenStartTime != 0L) {
             listenAccumulatedMs += System.currentTimeMillis() - listenStartTime
@@ -530,80 +524,39 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         listenAccumulatedMs = 0L
         listenDuration = 0L
         listenSongId = null
-        if (ms <= 0 || appSettings.mysqlHost.isBlank()) return
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                if (isOfflineMode) {
-                    offlineQueue.enqueueAddListen(songId, ms, dur)
-                    offlineQueueCount = offlineQueue.count()
-                } else {
-                    dbSync.addListen(
-                        host = appSettings.mysqlHost,
-                        port = appSettings.mysqlPort,
-                        user = appSettings.mysqlUser,
-                        password = appSettings.mysqlPassword,
-                        database = appSettings.mysqlDatabase,
-                        songId = songId,
-                        milliseconds = ms,
-                        duration = dur,
-                    )
-                }
-            } catch (e: Exception) {
-                Timber.e(e, "addListen error")
-                Sentry.captureException(e)
-                offlineQueue.enqueueAddListen(songId, ms, dur)
-                offlineQueueCount = offlineQueue.count()
-            }
-        }
+        if (ms <= 0) return
+        recordStat(
+            label = "addListen",
+            enqueue = { offlineQueue.enqueueAddListen(songId, ms, dur) },
+            send = { dbSync.addListen(appSettings, songId, ms, dur) },
+        )
     }
 
-    fun updateRateDance(songId: String, relPath: String, rate: Int, dance: Boolean, calm: Boolean) {
-        val updated = (songInfoMap[relPath]?.let { JSONObject(it.toString()) } ?: JSONObject()).apply {
+    fun updateRateDance(songId: String, rate: Int, dance: Boolean, calm: Boolean) {
+        val updated = (songInfoMap[songId]?.let { JSONObject(it.toString()) } ?: JSONObject()).apply {
             put("rate", rate)
             put("dance", if (dance) 1 else 0)
             put("calm", if (calm) 1 else 0)
         }
-        songInfoMap = songInfoMap + (relPath to updated)
-        if (appSettings.mysqlHost.isNotBlank()) {
-            viewModelScope.launch(Dispatchers.IO) {
-                try {
-                    if (isOfflineMode) {
-                        offlineQueue.enqueueSetRateDance(songId, rate, dance, calm)
-                        offlineQueueCount = offlineQueue.count()
-                    } else {
-                        dbSync.setRateDance(
-                            host = appSettings.mysqlHost,
-                            port = appSettings.mysqlPort,
-                            user = appSettings.mysqlUser,
-                            password = appSettings.mysqlPassword,
-                            database = appSettings.mysqlDatabase,
-                            songId = songId,
-                            rate = rate,
-                            dance = dance,
-                            calm = calm,
-                        )
-                    }
-                } catch (e: Exception) {
-                    Timber.e(e, "setRateDance error")
-                    Sentry.captureException(e)
-                    offlineQueue.enqueueSetRateDance(songId, rate, dance, calm)
-                    offlineQueueCount = offlineQueue.count()
-                }
-            }
-        }
+        songInfoMap = songInfoMap + (songId to updated)
+        recordStat(
+            label = "setRateDance",
+            enqueue = { offlineQueue.enqueueSetRateDance(songId, rate, dance, calm) },
+            send = { dbSync.setRateDance(appSettings, songId, rate, dance, calm) },
+        )
     }
 
     fun toggleOfflineMode() {
         val wasOffline = isOfflineMode
         isOfflineMode = !wasOffline
         appSettings.isOfflineMode = isOfflineMode
-        if (wasOffline && appSettings.mysqlHost.isNotBlank() && offlineQueueCount > 0) {
+        if (wasOffline && appSettings.isMysqlConfigured() && offlineQueueCount > 0) {
             flushOfflineQueue()
         }
     }
 
     fun flushOfflineQueue() {
-        if (appSettings.mysqlHost.isBlank()) return
+        if (!appSettings.isMysqlConfigured()) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val sent = offlineQueue.flushToDb(dbSync, appSettings)
@@ -617,6 +570,10 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    // ---------------------------------------------------------------------
+    // Sincronizare Nextcloud + MySQL
+    // ---------------------------------------------------------------------
 
     fun startSync() {
         if (!appSettings.isWebDavConfigured()) {
@@ -661,7 +618,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun startDbSync() {
-        if (appSettings.mysqlHost.isBlank()) {
+        if (!appSettings.isMysqlConfigured()) {
             showToast("Configurează conexiunea MySQL în setări.", Toast.LENGTH_LONG)
             currentScreen = Screen.Settings
             return
@@ -669,13 +626,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         isDbSyncBusy = true
         viewModelScope.launch {
             try {
-                val result = dbSync.sync(
-                    host = appSettings.mysqlHost,
-                    port = appSettings.mysqlPort,
-                    user = appSettings.mysqlUser,
-                    password = appSettings.mysqlPassword,
-                    database = appSettings.mysqlDatabase,
-                )
+                val result = dbSync.sync(appSettings)
                 withContext(Dispatchers.IO) {
                     val playlistIds = playlistStore.load(app)
                     playlistStore.saveEnriched(app, playlistIds, result)
@@ -735,32 +686,5 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         player.destroy()
         super.onCleared()
-    }
-
-}
-
-// -------------------------------------------------------------------------
-// Funcții utilitare pentru filtrare — refolosite în ViewModel și Composables
-// -------------------------------------------------------------------------
-fun matchesTextFilter(item: AudioItem, query: String, inverted: Boolean): Boolean {
-    val q = query.trim().lowercase()
-    val matches = (item.title ?: "").lowercase().contains(q) ||
-                  (item.artist ?: "").lowercase().contains(q)
-    return if (inverted) !matches else matches
-}
-
-fun passesRatingFilter(relPath: String, songInfoMap: Map<String, JSONObject>, filter: RatingFilter): Boolean {
-    val info = songInfoMap[relPath]
-    val rate = info?.optInt("rate", 0) ?: 0
-    val dance = info?.opt("dance").let { it == true || it == 1 || it?.toString() == "1" }
-    val calm  = info?.opt("calm").let  { it == true || it == 1 || it?.toString() == "1" }
-    return when (filter) {
-        RatingFilter.WITH_RATING -> rate > 0
-        RatingFilter.NO_RATING   -> rate == 0
-        RatingFilter.TOP         -> rate >= 4
-        RatingFilter.BEST        -> rate == 5
-        RatingFilter.DANCE       -> dance
-        RatingFilter.CALM        -> calm
-        RatingFilter.ALL         -> true
     }
 }
