@@ -32,6 +32,7 @@ import com.doublesymmetry.kotlinaudio.models.RepeatMode
 import com.doublesymmetry.kotlinaudio.players.QueuedAudioPlayer
 import io.sentry.Sentry
 import io.sentry.SentryLevel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -558,16 +559,24 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     fun flushOfflineQueue() {
         if (!appSettings.isMysqlConfigured()) return
         viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val sent = offlineQueue.flushToDb(dbSync, appSettings)
-                offlineQueueCount = 0
-                showToast("$sent operații trimise la MySQL.", Toast.LENGTH_SHORT)
-            } catch (e: Exception) {
-                offlineQueueCount = offlineQueue.count()
-                Timber.e(e, "flushOfflineQueue error")
-                Sentry.captureException(e)
-                showToast("Eroare trimitere offline: ${e.message}", Toast.LENGTH_LONG)
-            }
+            flushOfflineQueueNow()
+        }
+    }
+
+    // Golește coada offline în MySQL pe coroutina curentă (de așteptat înainte de pull-ul MySQL).
+    private suspend fun flushOfflineQueueNow() {
+        if (!appSettings.isMysqlConfigured() || offlineQueue.count() == 0) return
+        try {
+            val sent = offlineQueue.flushToDb(dbSync, appSettings)
+            offlineQueueCount = 0
+            if (sent > 0) showToast("$sent operații trimise la MySQL.", Toast.LENGTH_SHORT)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            offlineQueueCount = offlineQueue.count()
+            Timber.e(e, "flushOfflineQueue error")
+            Sentry.captureException(e)
+            showToast("Eroare trimitere offline: ${e.message}", Toast.LENGTH_LONG)
         }
     }
 
@@ -607,6 +616,8 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                             "Sincronizare completă: ${state.downloaded} descărcate, ${state.skipped} existau deja$deletedMsg.",
                             Toast.LENGTH_LONG
                         )
+                        // Întâi împinge scrierile locale în așteptare, apoi trage datele proaspete din MySQL.
+                        flushOfflineQueueNow()
                         startDbSync()
                     }
                     if (state is SyncState.Error) {
