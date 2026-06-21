@@ -46,6 +46,7 @@ import java.io.File
 import java.net.URLDecoder
 import java.util.concurrent.TimeUnit
 import kotlin.random.Random
+import kotlin.time.Duration.Companion.seconds
 
 @UnstableApi
 class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
@@ -82,7 +83,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
 
     companion object {
         // Cât așteaptă flush-ul după ultima modificare in-memory înainte de a scrie pe disc.
-        private const val PLAYLIST_FLUSH_DEBOUNCE_MS = 5_000L
+        private val PLAYLIST_FLUSH_DEBOUNCE = 5.seconds
     }
 
     val audioBaseDir: String
@@ -245,13 +246,31 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     // Navigare în playlist — alegerea indexului următor, o singură implementare
     // ---------------------------------------------------------------------
 
-    /** Index aleator din lista filtrată, diferit de cel curent; null dacă filtrul e gol. */
+    /** Index ales ponderat (după shuffle_weight) din lista filtrată, diferit de cel curent;
+     *  null dacă filtrul e gol. Piesele zeroizate (redate de la ultimul sync) au weight 0
+     *  → excluse din ruletă până la recalcularea greutăților la următorul sync. */
     private fun pickShuffle(): Int? {
         val fi = filteredIndices
         if (fi.isEmpty()) return null
-        val candidates = fi.filter { it != player.currentIndex }
-        return if (candidates.isEmpty()) fi.first()
-               else candidates[Random.nextInt(candidates.size)]
+        val candidates = fi.filter { it != player.currentIndex }.ifEmpty { fi }
+        return pickWeighted(candidates)
+    }
+
+    /** Ruletă ponderată pentru un singur index (vezi weightedShuffle pentru ordonarea întregii cozi).
+     *  Dacă toate greutățile sunt 0 → alegere uniformă (bazinul s-a epuizat de la ultimul sync). */
+    private fun pickWeighted(indices: List<Int>): Int {
+        val weighted = indices.map { idx ->
+            val id = songIdOf(player.items[idx].audioUrl)
+            idx to (songInfoMap[id]?.optDouble("shuffle_weight", 1.0) ?: 1.0).coerceAtLeast(0.0)
+        }
+        val total = weighted.sumOf { it.second }
+        if (total <= 0.0) return indices[Random.nextInt(indices.size)]
+        var r = Random.nextDouble() * total
+        for ((idx, w) in weighted) {
+            r -= w
+            if (r <= 0.0) return idx
+        }
+        return weighted.last().first
     }
 
     /** Indexul următor/precedent din lista filtrată (cu wrap-around); null dacă filtrul e gol. */
@@ -291,7 +310,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             PlaylistMode.MANUAL -> player.seek(0L, TimeUnit.MILLISECONDS)
             PlaylistMode.SHUFFLE -> {
                 val size = player.items.size.coerceAtLeast(1)
-                player.jumpToItem(pickShuffle() ?: (player.currentIndex - 1 + size) % size)
+                player.jumpToItem(pickShuffle() ?: ((player.currentIndex - 1 + size) % size))
                 player.play()
             }
             else -> {
@@ -566,7 +585,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     private fun scheduleFlush() {
         flushJob?.cancel()
         flushJob = viewModelScope.launch(Dispatchers.IO) {
-            delay(PLAYLIST_FLUSH_DEBOUNCE_MS)
+            delay(PLAYLIST_FLUSH_DEBOUNCE)
             playlistStore.persist(app, songInfoMap)
         }
     }

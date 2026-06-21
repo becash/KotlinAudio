@@ -1,22 +1,18 @@
 package com.becash.becashplayer.data
 
 import android.content.Context
+import android.os.Build
 import android.os.Environment
 import io.sentry.Sentry
 import io.sentry.SentryLevel
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Locale
-import kotlin.math.pow
 
 class PlaylistStore {
 
     companion object {
         private const val FILE_NAME = "playlist.json"
-        private const val MS_PER_MONTH = 30L * 24 * 60 * 60 * 1000
-        private const val MAX_AGE_MONTHS = 12L
         private val FILE_LOCK = Any()
     }
 
@@ -28,7 +24,7 @@ class PlaylistStore {
         val file = File(dir, FILE_NAME)
         if (!file.exists()) {
             Sentry.captureMessage(
-                "PlaylistStore: $FILE_NAME lipsă | cale=${file.absolutePath} | isExternalStorageManager=${Environment.isExternalStorageManager()}",
+                "PlaylistStore: $FILE_NAME lipsă | cale=${file.absolutePath} | isExternalStorageManager=${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Environment.isExternalStorageManager() else "n/a"}",
                 SentryLevel.WARNING
             )
             return JSONArray()
@@ -133,9 +129,8 @@ class PlaylistStore {
     /**
      * Salvează playlist-ul îmbogățit cu datele din MySQL și calculează coeficienții
      * de shuffle ponderat (câmp "shuffle_weight"):
-     *   - plays=0 → weight = 1000 × (max_plays+1)²
-     *   - plays>0 → weight = 1000 × (max_plays / plays)²  (invers pătratic — diferența ~10× mai mare față de liniar)
-     *   - greutatea se dublează pentru fiecare lună (max 12) față de câmpul "updated"
+     *   - plays=0 → weight = 1.0           (neascultată — cea mai grea)
+     *   - plays>0 → weight = 1 / plays²    (invers pătratic; doar raportul contează în ruletă)
      *   - se calculează și câmpul "completeness" (listen / duration×plays)
      */
     fun saveEnriched(context: Context, ids: List<String>, infoMap: Map<String, JSONObject>) = synchronized(FILE_LOCK) {
@@ -145,9 +140,8 @@ class PlaylistStore {
                 SentryLevel.WARNING
             )
         }
-        val now = System.currentTimeMillis()
         val normalizedIds = ids.map { if (it.startsWith("/")) it else "/$it" }
-        val weights = calculateShuffleWeights(normalizedIds, infoMap, now)
+        val weights = calculateShuffleWeights(normalizedIds, infoMap)
 
         val arr = JSONArray()
         normalizedIds.forEach { id ->
@@ -169,33 +163,10 @@ class PlaylistStore {
     private fun calculateShuffleWeights(
         ids: List<String>,
         infoMap: Map<String, JSONObject>,
-        now: Long,
-    ): Map<String, Double> {
-        val playsValues = ids.map { id -> infoMap[id]?.optInt("plays", 0) ?: 0 }
-        val maxPlays = playsValues.filter { it > 0 }.maxOrNull() ?: 1
-
-        val dateFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
-
-        return ids.mapIndexed { index, id ->
-            val plays = playsValues[index]
-            var weight = if (plays == 0) {
-                1000.0 * (maxPlays + 1).toDouble().pow(2)
-            } else {
-                1000.0 * (maxPlays.toDouble() / plays.toDouble()).pow(2)
-            }
-
-            val updatedRaw = infoMap[id]?.optString("updated")
-                ?.takeIf { it.isNotBlank() && it != "null" }
-            if (updatedRaw != null) {
-                val cleanStr = updatedRaw.substringBefore(".").trim()
-                val updatedTime = try { dateFmt.parse(cleanStr)?.time } catch (_: Exception) { null }
-                if (updatedTime != null && now > updatedTime) {
-                    val monthsAgo = ((now - updatedTime) / MS_PER_MONTH).coerceIn(0L, MAX_AGE_MONTHS)
-                    if (monthsAgo > 0) weight *= 2.0.pow(monthsAgo.toDouble())
-                }
-            }
-
-            id to weight
-        }.toMap()
+    ): Map<String, Double> = ids.associateWith { id ->
+        val plays = infoMap[id]?.optInt("plays", 0) ?: 0
+        // Doar raportul dintre greutăți contează în ruletă, nu mărimea absolută → scară mică:
+        //   neascultată (plays=0) → 1.0;  ascultată → 1/plays² (2 redări → 0.25, 10 → 0.01).
+        if (plays == 0) 1.0 else 1.0 / (plays.toDouble() * plays)
     }
 }
