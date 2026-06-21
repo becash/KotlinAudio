@@ -114,27 +114,18 @@ class PlaylistStore {
         }
     }
 
-    fun loadWeightsMap(context: Context): Map<String, Double> = synchronized(FILE_LOCK) {
-        val arr = readJsonArray(context)
-        val result = mutableMapOf<String, Double>()
-        for (i in 0 until arr.length()) {
-            val obj = arr.optJSONObject(i) ?: continue
-            val id = obj.optString("id").takeIf { it.isNotBlank() } ?: continue
-            val weight = obj.optDouble("shuffle_weight", -1.0)
-            if (weight >= 0) result[id] = weight
-        }
-        result
-    }
-
-    fun zeroWeight(context: Context, songId: String) = synchronized(FILE_LOCK) {
-        val arr = readJsonArray(context)
-        val normalizedId = if (songId.startsWith("/")) songId else "/$songId"
-        for (i in 0 until arr.length()) {
-            val obj = arr.optJSONObject(i) ?: continue
-            if (obj.optString("id") == normalizedId) {
-                obj.put("shuffle_weight", 0.0)
-                break
-            }
+    /**
+     * Persistă starea curentă (din memorie) ca atare, FĂRĂ recalcularea greutăților.
+     * Folosit de flush-ul debounced după zeroizarea in-memory a `shuffle_weight`:
+     * sursa de adevăr e harta din memorie (`songInfoMap` în PlayerViewModel), iar
+     * fișierul e doar proiecția ei — scrisă rar, pe triggere, nu la fiecare tranziție.
+     */
+    fun persist(context: Context, infoMap: Map<String, JSONObject>) = synchronized(FILE_LOCK) {
+        val arr = JSONArray()
+        infoMap.forEach { (id, info) ->
+            val obj = JSONObject(info.toString())
+            if (obj.optString("id").isBlank()) obj.put("id", id)
+            arr.put(obj)
         }
         writeJsonArray(context, arr)
     }

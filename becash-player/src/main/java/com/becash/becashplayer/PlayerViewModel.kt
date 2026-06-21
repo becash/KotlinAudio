@@ -34,6 +34,8 @@ import io.sentry.Sentry
 import io.sentry.SentryLevel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -74,6 +76,14 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     private var listenDuration = 0L
     private var listenStartTime = 0L
     private var listenAccumulatedMs = 0L
+
+    // Flush debounced al playlist-ului pe disc (vezi zeroWeightInMemory / scheduleFlush).
+    private var flushJob: Job? = null
+
+    companion object {
+        // Cât așteaptă flush-ul după ultima modificare in-memory înainte de a scrie pe disc.
+        private const val PLAYLIST_FLUSH_DEBOUNCE_MS = 5_000L
+    }
 
     val audioBaseDir: String
         get() = File(Environment.getExternalStorageDirectory(), appSettings.localFolderName).absolutePath
@@ -178,9 +188,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         val justPlayedSongId = listenSongId
         flushListen()
         if (justPlayedSongId != null) {
-            viewModelScope.launch(Dispatchers.IO) {
-                playlistStore.zeroWeight(app, justPlayedSongId)
-            }
+            zeroWeightInMemory(justPlayedSongId)
         }
 
         // Cântecul s-a terminat — ExoPlayer a repetat prin RepeatMode.ONE.
@@ -308,8 +316,10 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             withContext(Dispatchers.IO) {
                 localFile.delete()
                 val deletedId = "/$relativePath"
-                val remainingMap = playlistStore.loadAsMap(app) - deletedId
-                playlistStore.saveEnriched(app, remainingMap.keys.toList(), remainingMap)
+                // Sursa de adevăr e memoria: scoatem piesa din songInfoMap, fără scriere pe disc.
+                // Discul se curăță la următorul flush (debounce/onStop); între timp guard-ul
+                // file.exists() din buildLocalAudioItems împiedică redarea unei intrări-fantomă.
+                songInfoMap = songInfoMap - deletedId
             }
             player.remove(deletedIndex)
             playlistItems = player.items
@@ -380,7 +390,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val items = withContext(Dispatchers.IO) {
                 if (playlistMode == PlaylistMode.SHUFFLE && currentUrl != null) {
-                    songIdOf(currentUrl)?.let { playlistStore.zeroWeight(app, it) }
+                    songIdOf(currentUrl)?.let { zeroWeightInMemory(it) }
                 }
                 buildLocalAudioItems()
             }
@@ -426,8 +436,13 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             }
             scanned
         }
+        // Sursa de adevăr pentru greutăți e songInfoMap (in-memory) — onorează zeroizările
+        // încă neflush-uite pe disc; discul e doar proiecția acestei hărți.
         val files = if (playlistMode == PlaylistMode.SHUFFLE) {
-            val weightsMap = playlistStore.loadWeightsMap(app)
+            val weightsMap = songInfoMap.mapNotNull { (id, obj) ->
+                val w = obj.optDouble("shuffle_weight", -1.0)
+                if (w >= 0) id to w else null
+            }.toMap()
             val fileList = paths.map { File(it) }
             if (weightsMap.isEmpty()) fileList.shuffled()
             else {
@@ -441,7 +456,9 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         } else {
             paths.map { File(it) }.sortedWith(compareBy({ it.parent }, { it.name }))
         }
-        return files.map { file ->
+        // Guard: sare peste intrările-fantomă (fișiere șterse dar încă în playlist.json,
+        // ex. ștergere neflush-uită urmată de crash, sau ștergere manuală din afara aplicației).
+        return files.filter { it.exists() }.map { file ->
             val folderName = file.parentFile
                 ?.takeIf { it != audioDir }
                 ?.toRelativeString(audioDir)
@@ -533,6 +550,35 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         )
     }
 
+    // ---------------------------------------------------------------------
+    // Persistarea greutăților de shuffle: sursa de adevăr e songInfoMap (in-memory),
+    // discul e doar proiecția ei, scrisă debounced — nu la fiecare tranziție.
+    // ---------------------------------------------------------------------
+
+    /** Zeroizează greutatea de shuffle în memorie și programează un flush debounced. */
+    private fun zeroWeightInMemory(songId: String) {
+        val id = if (songId.startsWith("/")) songId else "/$songId"
+        songInfoMap[id]?.put("shuffle_weight", 0.0) ?: return
+        scheduleFlush()
+    }
+
+    /** (Re)pornește timerul de flush: scrie pe disc o singură dată după ce modificările s-au liniștit. */
+    private fun scheduleFlush() {
+        flushJob?.cancel()
+        flushJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(PLAYLIST_FLUSH_DEBOUNCE_MS)
+            playlistStore.persist(app, songInfoMap)
+        }
+    }
+
+    /** Scrie imediat starea curentă pe disc și anulează debounce-ul (apelat din onStop). */
+    fun flushPlaylistNow() {
+        flushJob?.cancel()
+        viewModelScope.launch(Dispatchers.IO) {
+            playlistStore.persist(app, songInfoMap)
+        }
+    }
+
     fun updateRateDance(songId: String, rate: Int, dance: Boolean, calm: Boolean) {
         val updated = (songInfoMap[songId]?.let { JSONObject(it.toString()) } ?: JSONObject()).apply {
             put("rate", rate)
@@ -610,6 +656,8 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                             }
                             playlistStore.saveEnriched(app, relIds, songInfoMap)
                         }
+                        // saveEnriched a recalculat greutățile pe disc → aliniem memoria cu discul.
+                        songInfoMap = playlistStore.loadAsMap(app)
                         reloadPlayer()
                         val deletedMsg = if (state.deleted > 0) ", ${state.deleted} șterse local" else ""
                         showToast(
@@ -700,6 +748,9 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        // viewModelScope e deja anulat aici → persistăm sincron, ca garanție finală.
+        flushJob?.cancel()
+        runCatching { playlistStore.persist(app, songInfoMap) }
         player.destroy()
         super.onCleared()
     }
