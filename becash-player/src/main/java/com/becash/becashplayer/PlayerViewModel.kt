@@ -638,6 +638,11 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val result = dbSync.sync(appSettings)
+                if (result == null) {
+                    // MySQL inaccesibil: păstrăm playlist-ul îmbogățit existent, nu-l suprascriem cu ID-uri goale.
+                    showToast("MySQL inaccesibil — playlist-ul local a fost păstrat.", Toast.LENGTH_LONG)
+                    return@launch
+                }
                 withContext(Dispatchers.IO) {
                     val playlistIds = playlistStore.load(app)
                     playlistStore.saveEnriched(app, playlistIds, result)

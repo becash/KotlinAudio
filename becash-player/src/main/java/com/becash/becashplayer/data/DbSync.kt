@@ -73,8 +73,10 @@ class DbSync {
         }
     }
 
-    suspend fun sync(settings: AppSettings): Map<String, JSONObject> =
-        runOp(settings, useDatabase = false, op = "sync", fallback = emptyMap()) { c ->
+    // Întoarce null dacă MySQL e inaccesibil (eroare de rețea după retry-uri), ca apelantul să NU
+    // suprascrie playlist-ul îmbogățit cu ID-uri goale. Un map gol înseamnă tabel "played" gol legitim.
+    suspend fun sync(settings: AppSettings): Map<String, JSONObject>? =
+        runOp<Map<String, JSONObject>?>(settings, useDatabase = false, op = "sync", fallback = null) { c ->
             val database = settings.mysqlDatabase
             c.createStatement().use { stmt ->
                 stmt.execute("CREATE DATABASE IF NOT EXISTS `$database` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
