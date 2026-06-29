@@ -84,6 +84,11 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     companion object {
         // Cât așteaptă flush-ul după ultima modificare in-memory înainte de a scrie pe disc.
         private val PLAYLIST_FLUSH_DEBOUNCE = 5.seconds
+
+        // Toleranța de egalizare a redărilor în shuffle: o piesă cu plays ≥ (minimul listei
+        // curente + această valoare) e scoasă din ruletă (weight 0), ca să se redea întâi
+        // cele mai puțin ascultate din lista care se cântă acum.
+        private const val PLAYS_EQUALIZE_TOLERANCE = 2
     }
 
     val audioBaseDir: String
@@ -257,11 +262,26 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     /** Ruletă ponderată pentru un singur index (vezi weightedShuffle pentru ordonarea întregii cozi).
-     *  Dacă toate greutățile sunt 0 → alegere uniformă (bazinul s-a epuizat de la ultimul sync). */
+     *  Greutatea de bază e shuffle_weight, peste care se aplică un criteriu dinamic de egalizare a
+     *  redărilor calculat pe lista curentă (vezi PLAYS_EQUALIZE_TOLERANCE).
+     *  Dacă toate greutățile rezultate sunt 0 → alegere uniformă (bazinul s-a epuizat). */
     private fun pickWeighted(indices: List<Int>): Int {
-        val weighted = indices.map { idx ->
-            val id = songIdOf(player.items[idx].audioUrl)
-            idx to (songInfoMap[id]?.optDouble("shuffle_weight", 1.0) ?: 1.0).coerceAtLeast(0.0)
+        // player.items reconstruiește toată coada la fiecare acces (lookup în registry per intrare),
+        // deci îl citim O singură dată aici; altfel bucla devine O(n²) și blochează thread-ul UI (ANR).
+        val items = player.items
+        // Pentru fiecare candidat reținem weight-ul (shuffle_weight) și plays-ul (din songInfoMap).
+        val stats = indices.map { idx ->
+            val info = songIdOf(items[idx].audioUrl)?.let { songInfoMap[it] }
+            val weight = (info?.optDouble("shuffle_weight", 1.0) ?: 1.0).coerceAtLeast(0.0)
+            val plays = info?.optInt("plays", 0) ?: 0
+            Triple(idx, weight, plays)
+        }
+        // Criteriu dinamic, recalculat la fiecare alegere DOAR pe lista care se cântă acum
+        // (candidații), nu pe tot playlist-ul: piesele cu plays peste minimul curent + toleranță
+        // sunt scoase din ruletă (weight 0), ca să se redea întâi cele mai puțin ascultate.
+        val minPlays = stats.minOfOrNull { it.third } ?: 0
+        val weighted = stats.map { (idx, weight, plays) ->
+            idx to if (plays >= minPlays + PLAYS_EQUALIZE_TOLERANCE) 0.0 else weight
         }
         val total = weighted.sumOf { it.second }
         if (total <= 0.0) return indices[Random.nextInt(indices.size)]
@@ -541,6 +561,8 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 } else {
                     send()
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Timber.e(e, "$label error")
                 Sentry.captureException(e)
@@ -717,6 +739,8 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 songInfoMap = playlistStore.loadAsMap(app)
                 showToast("MySQL: ${result.size} cântece sincronizate.", Toast.LENGTH_SHORT)
                 reloadPlayer()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Timber.e(e, "DbSync error")
                 Sentry.captureException(e)
