@@ -173,6 +173,9 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 when (state) {
                     AudioPlayerState.PLAYING -> {
                         if (listenStartTime == 0L) listenStartTime = System.currentTimeMillis()
+                        // La tranziție durata ExoPlayer nu e încă cunoscută (0) — o capturăm
+                        // aici, când piesa chiar cântă; fără ea DB-ul nu poate calcula completeness.
+                        if (listenDuration == 0L) listenDuration = player.duration
                     }
                     AudioPlayerState.PAUSED -> {
                         if (listenStartTime != 0L) {
@@ -204,6 +207,8 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                 PlaylistMode.PLAY_ONE -> {
                     // intenționat: repetă același cântec, actualizăm doar listen tracking
                     listenSongId = currentSongId
+                    // Nu urmează niciun eveniment PLAYING (piesa continuă) — reținem durata acum.
+                    listenDuration = player.duration
                 }
                 PlaylistMode.MANUAL -> {
                     val nextIdx = manualNextIndex
@@ -236,7 +241,10 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         listenSongId = songId
         currentTrackIndex = player.currentIndex
         playlistItems = player.items
-        listenDuration = player.currentItem?.duration ?: 0L
+        // AudioItem.duration e mereu null la fișiere locale; player.duration (ExoPlayer) e
+        // sursa reală, dar la momentul tranziției poate fi încă necunoscută (0) — se
+        // completează la primul eveniment PLAYING (vezi stateChange).
+        listenDuration = player.duration
 
         if (songId != null) {
             recordStat(
