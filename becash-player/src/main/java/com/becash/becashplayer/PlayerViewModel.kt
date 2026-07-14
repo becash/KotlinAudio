@@ -13,7 +13,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import com.becash.becashplayer.data.AUDIO_EXTENSIONS
 import com.becash.becashplayer.data.AppSettings
-import com.becash.becashplayer.data.DbSync
+import com.becash.becashplayer.data.ApiSync
 import com.becash.becashplayer.data.OfflineQueue
 import com.becash.becashplayer.data.PlaylistStore
 import com.becash.becashplayer.data.SyncState
@@ -54,7 +54,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     val appSettings = AppSettings(app)
     val playlistStore = PlaylistStore()
     val webDavSync = WebDavSync()
-    val dbSync = DbSync()
+    val apiSync = ApiSync()
     val offlineQueue = OfflineQueue(app)
 
     val player: QueuedAudioPlayer
@@ -250,7 +250,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
             recordStat(
                 label = "incrementPlays",
                 enqueue = { offlineQueue.enqueueIncrementPlays(songId) },
-                send = { dbSync.incrementPlays(appSettings, songId) },
+                send = { apiSync.incrementPlays(appSettings, songId) },
             )
         }
     }
@@ -552,15 +552,15 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     // ---------------------------------------------------------------------
-    // Statistici (MySQL sau coadă offline) — un singur loc pentru dispatch
+    // Statistici (server API sau coadă offline) — un singur loc pentru dispatch
     // ---------------------------------------------------------------------
 
     /**
      * Rulează o operație de statistici: în mod offline o pune în coadă, altfel
-     * o trimite la MySQL; la eroare cade înapoi pe coada offline.
+     * o trimite la serverul API; la eroare cade înapoi pe coada offline.
      */
     private fun recordStat(label: String, enqueue: () -> Unit, send: suspend () -> Unit) {
-        if (!appSettings.isMysqlConfigured()) return
+        if (!appSettings.isApiConfigured()) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (isOfflineMode) {
@@ -595,7 +595,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         recordStat(
             label = "addListen",
             enqueue = { offlineQueue.enqueueAddListen(songId, ms, dur) },
-            send = { dbSync.addListen(appSettings, songId, ms, dur) },
+            send = { apiSync.addListen(appSettings, songId, ms, dur) },
         )
     }
 
@@ -638,7 +638,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         recordStat(
             label = "setRateDance",
             enqueue = { offlineQueue.enqueueSetRateDance(songId, rate, dance, calm) },
-            send = { dbSync.setRateDance(appSettings, songId, rate, dance, calm) },
+            send = { apiSync.setRateDance(appSettings, songId, rate, dance, calm) },
         )
     }
 
@@ -646,25 +646,25 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
         val wasOffline = isOfflineMode
         isOfflineMode = !wasOffline
         appSettings.isOfflineMode = isOfflineMode
-        if (wasOffline && appSettings.isMysqlConfigured() && offlineQueueCount > 0) {
+        if (wasOffline && appSettings.isApiConfigured() && offlineQueueCount > 0) {
             flushOfflineQueue()
         }
     }
 
     fun flushOfflineQueue() {
-        if (!appSettings.isMysqlConfigured()) return
+        if (!appSettings.isApiConfigured()) return
         viewModelScope.launch(Dispatchers.IO) {
             flushOfflineQueueNow()
         }
     }
 
-    // Golește coada offline în MySQL pe coroutina curentă (de așteptat înainte de pull-ul MySQL).
+    // Golește coada offline pe server pe coroutina curentă (de așteptat înainte de pull-ul de statistici).
     private suspend fun flushOfflineQueueNow() {
-        if (!appSettings.isMysqlConfigured() || offlineQueue.count() == 0) return
+        if (!appSettings.isApiConfigured() || offlineQueue.count() == 0) return
         try {
-            val sent = offlineQueue.flushToDb(dbSync, appSettings)
+            val sent = offlineQueue.flush(apiSync, appSettings)
             offlineQueueCount = 0
-            if (sent > 0) showToast("$sent operații trimise la MySQL.", Toast.LENGTH_SHORT)
+            if (sent > 0) showToast("$sent operații trimise la server.", Toast.LENGTH_SHORT)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -676,7 +676,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     // ---------------------------------------------------------------------
-    // Sincronizare Nextcloud + MySQL
+    // Sincronizare Nextcloud + server API
     // ---------------------------------------------------------------------
 
     fun startSync() {
@@ -699,7 +699,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                             val relIds = paths.map { "/${it.removePrefix("$basePath/")}" }
                             if (songInfoMap.isEmpty()) {
                                 Sentry.captureMessage(
-                                    "startSync: songInfoMap gol → saveEnriched fără date MySQL | fișiere=${paths.size}",
+                                    "startSync: songInfoMap gol → saveEnriched fără date de pe server | fișiere=${paths.size}",
                                     SentryLevel.WARNING
                                 )
                             }
@@ -713,7 +713,7 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                             "Sincronizare completă: ${state.downloaded} descărcate, ${state.skipped} existau deja$deletedMsg.",
                             Toast.LENGTH_LONG
                         )
-                        // Întâi împinge scrierile locale în așteptare, apoi trage datele proaspete din MySQL.
+                        // Întâi împinge scrierile locale în așteptare, apoi trage datele proaspete de pe server.
                         flushOfflineQueueNow()
                         startDbSync()
                     }
@@ -726,18 +726,18 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun startDbSync() {
-        if (!appSettings.isMysqlConfigured()) {
-            showToast("Configurează conexiunea MySQL în setări.", Toast.LENGTH_LONG)
+        if (!appSettings.isApiConfigured()) {
+            showToast("Configurează serverul API în setări.", Toast.LENGTH_LONG)
             currentScreen = Screen.Settings
             return
         }
         isDbSyncBusy = true
         viewModelScope.launch {
             try {
-                val result = dbSync.sync(appSettings)
+                val result = apiSync.sync(appSettings)
                 if (result == null) {
-                    // MySQL inaccesibil: păstrăm playlist-ul îmbogățit existent, nu-l suprascriem cu ID-uri goale.
-                    showToast("MySQL inaccesibil — playlist-ul local a fost păstrat.", Toast.LENGTH_LONG)
+                    // Server inaccesibil: păstrăm playlist-ul îmbogățit existent, nu-l suprascriem cu ID-uri goale.
+                    showToast("Server API inaccesibil — playlist-ul local a fost păstrat.", Toast.LENGTH_LONG)
                     return@launch
                 }
                 withContext(Dispatchers.IO) {
@@ -745,14 +745,14 @@ class PlayerViewModel(private val app: Application) : AndroidViewModel(app) {
                     playlistStore.saveEnriched(app, playlistIds, result)
                 }
                 songInfoMap = playlistStore.loadAsMap(app)
-                showToast("MySQL: ${result.size} cântece sincronizate.", Toast.LENGTH_SHORT)
+                showToast("Server: ${result.size} cântece sincronizate.", Toast.LENGTH_SHORT)
                 reloadPlayer()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Timber.e(e, "DbSync error")
+                Timber.e(e, "ApiSync error")
                 Sentry.captureException(e)
-                showToast("Eroare MySQL: ${e.message}", Toast.LENGTH_LONG)
+                showToast("Eroare server API: ${e.message}", Toast.LENGTH_LONG)
             } finally {
                 isDbSyncBusy = false
             }

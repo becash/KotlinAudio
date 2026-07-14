@@ -29,11 +29,8 @@ android {
         buildConfigField("String", "DEFAULT_USERNAME",       "\"${localProps["DEFAULT_USERNAME"]}\"")
         buildConfigField("String", "DEFAULT_PASSWORD",       "\"${localProps["DEFAULT_PASSWORD"]}\"")
         buildConfigField("String", "DEFAULT_REMOTE_FOLDER",  "\"${localProps["DEFAULT_REMOTE_FOLDER"]}\"")
-        buildConfigField("String", "DEFAULT_MYSQL_HOST",     "\"${localProps["DEFAULT_MYSQL_HOST"]}\"")
-        buildConfigField("int",    "DEFAULT_MYSQL_PORT",     "${localProps["DEFAULT_MYSQL_PORT"]}")
-        buildConfigField("String", "DEFAULT_MYSQL_USER",     "\"${localProps["DEFAULT_MYSQL_USER"]}\"")
-        buildConfigField("String", "DEFAULT_MYSQL_PASSWORD", "\"${localProps["DEFAULT_MYSQL_PASSWORD"]}\"")
-        buildConfigField("String", "DEFAULT_MYSQL_DB",       "\"${localProps["DEFAULT_MYSQL_DB"]}\"")
+        buildConfigField("String", "DEFAULT_API_URL",        "\"${localProps["DEFAULT_API_URL"] ?: ""}\"")
+        buildConfigField("String", "DEFAULT_API_KEY",        "\"${localProps["DEFAULT_API_KEY"] ?: ""}\"")
         buildConfigField("String", "BARIERA9",               "\"${localProps["BARIERA9"]}\"")
         buildConfigField("String", "BARIERA10",              "\"${localProps["BARIERA10"]}\"")
     }
@@ -97,7 +94,6 @@ dependencies {
 
     implementation(project(":kotlin-audio"))
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("mysql:mysql-connector-java:5.1.49")
     implementation("io.sentry:sentry-android:7.19.1")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.3")

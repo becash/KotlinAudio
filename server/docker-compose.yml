@@ -1,0 +1,32 @@
+services:
+  becash-player-api:
+    image: becash-player-api:latest
+    build: .
+    container_name: becash-player-api
+    restart: unless-stopped
+    # Legat doar de 127.0.0.1: TLS-ul îl face nginx-ul de pe host, care face
+    # proxy de pe https://ci.md/player/ către acest port (vezi README).
+    ports:
+      - "127.0.0.1:18086:8080"
+    environment:
+      API_KEY: ${API_KEY}
+      # Numele containerului MySQL din rețeaua "permanent".
+      MYSQL_HOST: ${MYSQL_HOST:-player-mysql}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-becash}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DB: ${MYSQL_DB:-becash_player}
+      # Prefixul public sub care nginx expune API-ul — doar ca /docs și
+      # schema OpenAPI să genereze URL-uri corecte; rutele rămân la rădăcină.
+      ROOT_PATH: /player
+    networks:
+      - permanent
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  permanent:
+    external: true

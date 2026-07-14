@@ -32,11 +32,8 @@ class AppSettings(context: Context) {
         put(KEY_LOCAL_FOLDER,     DEFAULT_LOCAL_FOLDER)
         put(KEY_LAST_TRACK_INDEX, DEFAULT_LAST_TRACK_INDEX)
         put(KEY_LAST_PLAYLIST,    DEFAULT_LAST_PLAYLIST)
-        put(KEY_MYSQL_HOST,       DEFAULT_MYSQL_HOST)
-        put(KEY_MYSQL_PORT,       DEFAULT_MYSQL_PORT)
-        put(KEY_MYSQL_USER,       DEFAULT_MYSQL_USER)
-        put(KEY_MYSQL_PASSWORD,   DEFAULT_MYSQL_PASSWORD)
-        put(KEY_MYSQL_DB,         DEFAULT_MYSQL_DB)
+        put(KEY_API_URL,          DEFAULT_API_URL)
+        put(KEY_API_KEY,          DEFAULT_API_KEY)
         put(KEY_BARIERA9,         BuildConfig.BARIERA9)
         put(KEY_BARIERA10,        BuildConfig.BARIERA10)
     }
@@ -88,25 +85,13 @@ class AppSettings(context: Context) {
         get() = data.optString(KEY_LAST_SONG_URL, "")
         set(v) { data.put(KEY_LAST_SONG_URL, v); save() }
 
-    var mysqlHost: String
-        get() = data.optString(KEY_MYSQL_HOST, DEFAULT_MYSQL_HOST)
-        set(v) { data.put(KEY_MYSQL_HOST, v); save() }
+    var apiUrl: String
+        get() = data.optString(KEY_API_URL, DEFAULT_API_URL)
+        set(v) { data.put(KEY_API_URL, v); save() }
 
-    var mysqlPort: Int
-        get() = data.optInt(KEY_MYSQL_PORT, DEFAULT_MYSQL_PORT)
-        set(v) { data.put(KEY_MYSQL_PORT, v); save() }
-
-    var mysqlUser: String
-        get() = data.optString(KEY_MYSQL_USER, DEFAULT_MYSQL_USER)
-        set(v) { data.put(KEY_MYSQL_USER, v); save() }
-
-    var mysqlPassword: String
-        get() = data.optString(KEY_MYSQL_PASSWORD, DEFAULT_MYSQL_PASSWORD)
-        set(v) { data.put(KEY_MYSQL_PASSWORD, v); save() }
-
-    var mysqlDatabase: String
-        get() = data.optString(KEY_MYSQL_DB, DEFAULT_MYSQL_DB)
-        set(v) { data.put(KEY_MYSQL_DB, v); save() }
+    var apiKey: String
+        get() = data.optString(KEY_API_KEY, DEFAULT_API_KEY)
+        set(v) { data.put(KEY_API_KEY, v); save() }
 
     var bariera9: String
         get() = data.optString(KEY_BARIERA9, BuildConfig.BARIERA9)
@@ -123,7 +108,7 @@ class AppSettings(context: Context) {
     fun isWebDavConfigured(): Boolean =
         serverUrl.isNotBlank() && username.isNotBlank() && password.isNotBlank()
 
-    fun isMysqlConfigured(): Boolean = mysqlHost.isNotBlank()
+    fun isApiConfigured(): Boolean = apiUrl.isNotBlank()
 
     companion object {
         private const val KEY_SERVER_URL       = "server_url"
@@ -137,11 +122,8 @@ class AppSettings(context: Context) {
         private const val KEY_FILTER_INVERTED    = "filter_inverted"
         private const val KEY_LAST_RATING_FILTER = "last_rating_filter"
         private const val KEY_LAST_SONG_URL      = "last_song_url"
-        private const val KEY_MYSQL_HOST       = "mysql_host"
-        private const val KEY_MYSQL_PORT       = "mysql_port"
-        private const val KEY_MYSQL_USER       = "mysql_user"
-        private const val KEY_MYSQL_PASSWORD   = "mysql_password"
-        private const val KEY_MYSQL_DB         = "mysql_db"
+        private const val KEY_API_URL          = "api_url"
+        private const val KEY_API_KEY          = "api_key"
         private const val KEY_BARIERA9         = "bariera9"
         private const val KEY_BARIERA10        = "bariera10"
         private const val KEY_OFFLINE_MODE     = "offline_mode"
@@ -154,10 +136,7 @@ class AppSettings(context: Context) {
         private const val DEFAULT_LAST_TRACK_INDEX = 0
         private const val DEFAULT_LAST_PLAYLIST     = "SHUFFLE"
         private const val DEFAULT_LAST_RATING_FILTER = "ALL"
-        private val DEFAULT_MYSQL_HOST      get() = BuildConfig.DEFAULT_MYSQL_HOST
-        private val DEFAULT_MYSQL_PORT      get() = BuildConfig.DEFAULT_MYSQL_PORT
-        private val DEFAULT_MYSQL_USER      get() = BuildConfig.DEFAULT_MYSQL_USER
-        private val DEFAULT_MYSQL_PASSWORD  get() = BuildConfig.DEFAULT_MYSQL_PASSWORD
-        private val DEFAULT_MYSQL_DB        get() = BuildConfig.DEFAULT_MYSQL_DB
+        private val DEFAULT_API_URL         get() = BuildConfig.DEFAULT_API_URL
+        private val DEFAULT_API_KEY         get() = BuildConfig.DEFAULT_API_KEY
     }
 }

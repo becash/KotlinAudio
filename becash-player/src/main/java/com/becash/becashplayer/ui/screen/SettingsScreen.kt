@@ -46,11 +46,8 @@ fun SettingsScreen(
     var password by remember { mutableStateOf(settings.password) }
     var remoteFolderPath by remember { mutableStateOf(settings.remoteFolderPath) }
     var localFolderName by remember { mutableStateOf(settings.localFolderName) }
-    var mysqlHost by remember { mutableStateOf(settings.mysqlHost) }
-    var mysqlPort by remember { mutableStateOf(settings.mysqlPort.toString()) }
-    var mysqlUser by remember { mutableStateOf(settings.mysqlUser) }
-    var mysqlPassword by remember { mutableStateOf(settings.mysqlPassword) }
-    var mysqlDatabase by remember { mutableStateOf(settings.mysqlDatabase) }
+    var apiUrl by remember { mutableStateOf(settings.apiUrl) }
+    var apiKey by remember { mutableStateOf(settings.apiKey) }
     var bariera9 by remember { mutableStateOf(settings.bariera9) }
     var bariera10 by remember { mutableStateOf(settings.bariera10) }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -171,16 +168,16 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(20.dp))
 
                 Text(
-                    text = "Bază de date MySQL",
+                    text = "Server API (statistici)",
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
 
                 OutlinedTextField(
-                    value = mysqlHost,
-                    onValueChange = { mysqlHost = it },
-                    label = { Text("Host MySQL") },
-                    placeholder = { Text("c.ci.md") },
+                    value = apiUrl,
+                    onValueChange = { apiUrl = it },
+                    label = { Text("URL server API") },
+                    placeholder = { Text("https://api.exemplu.ro") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                     modifier = Modifier.fillMaxWidth()
@@ -189,45 +186,12 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
-                    value = mysqlPort,
-                    onValueChange = { mysqlPort = it },
-                    label = { Text("Port MySQL") },
-                    placeholder = { Text("3306") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = mysqlUser,
-                    onValueChange = { mysqlUser = it },
-                    label = { Text("Utilizator MySQL") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = mysqlPassword,
-                    onValueChange = { mysqlPassword = it },
-                    label = { Text("Parolă MySQL") },
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text("Cheie API") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = mysqlDatabase,
-                    onValueChange = { mysqlDatabase = it },
-                    label = { Text("Bază de date") },
-                    placeholder = { Text("becash_player") },
-                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -270,11 +234,8 @@ fun SettingsScreen(
                             if (it.startsWith('/')) it else "/$it"
                         }
                         settings.localFolderName = localFolderName.trim().ifEmpty { "Audio" }
-                        settings.mysqlHost = mysqlHost.trim()
-                        settings.mysqlPort = mysqlPort.trim().toIntOrNull() ?: 3306
-                        settings.mysqlUser = mysqlUser.trim()
-                        settings.mysqlPassword = mysqlPassword
-                        settings.mysqlDatabase = mysqlDatabase.trim().ifEmpty { "becash_player" }
+                        settings.apiUrl = apiUrl.trim().trimEnd('/')
+                        settings.apiKey = apiKey.trim()
                         settings.bariera9 = bariera9.trim()
                         settings.bariera10 = bariera10.trim()
                         savedMessage = true

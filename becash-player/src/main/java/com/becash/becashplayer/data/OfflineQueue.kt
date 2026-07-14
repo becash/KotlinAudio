@@ -12,6 +12,28 @@ class OfflineQueue(private val context: Context) {
         const val TYPE_INCREMENT_PLAYS = "incrementPlays"
         const val TYPE_ADD_LISTEN      = "addListen"
         const val TYPE_SET_RATE_DANCE  = "setRateDance"
+
+        // Formatul operațiilor e contractul cu serverul (POST /ops) — aceleași
+        // obiecte se scriu în coadă și se trimit live prin ApiSync.
+        fun opIncrementPlays(songId: String) = JSONObject().apply {
+            put("type", TYPE_INCREMENT_PLAYS)
+            put("songId", songId)
+        }
+
+        fun opAddListen(songId: String, milliseconds: Long, duration: Long) = JSONObject().apply {
+            put("type", TYPE_ADD_LISTEN)
+            put("songId", songId)
+            put("milliseconds", milliseconds)
+            put("duration", duration)
+        }
+
+        fun opSetRateDance(songId: String, rate: Int, dance: Boolean, calm: Boolean) = JSONObject().apply {
+            put("type", TYPE_SET_RATE_DANCE)
+            put("songId", songId)
+            put("rate", rate)
+            put("dance", if (dance) 1 else 0)
+            put("calm", if (calm) 1 else 0)
+        }
     }
 
     private fun file(): File? = context.getExternalFilesDir(null)?.let { File(it, FILE_NAME) }
@@ -36,65 +58,25 @@ class OfflineQueue(private val context: Context) {
         writeArray(arr)
     }
 
-    fun enqueueIncrementPlays(songId: String) = enqueue(JSONObject().apply {
-        put("type", TYPE_INCREMENT_PLAYS)
-        put("songId", songId)
-    })
+    fun enqueueIncrementPlays(songId: String) = enqueue(opIncrementPlays(songId))
 
-    fun enqueueAddListen(songId: String, milliseconds: Long, duration: Long) = enqueue(JSONObject().apply {
-        put("type", TYPE_ADD_LISTEN)
-        put("songId", songId)
-        put("milliseconds", milliseconds)
-        put("duration", duration)
-    })
+    fun enqueueAddListen(songId: String, milliseconds: Long, duration: Long) =
+        enqueue(opAddListen(songId, milliseconds, duration))
 
-    fun enqueueSetRateDance(songId: String, rate: Int, dance: Boolean, calm: Boolean) = enqueue(JSONObject().apply {
-        put("type", TYPE_SET_RATE_DANCE)
-        put("songId", songId)
-        put("rate", rate)
-        put("dance", if (dance) 1 else 0)
-        put("calm", if (calm) 1 else 0)
-    })
+    fun enqueueSetRateDance(songId: String, rate: Int, dance: Boolean, calm: Boolean) =
+        enqueue(opSetRateDance(songId, rate, dance, calm))
 
     fun clear() = writeArray(JSONArray())
 
     /**
-     * Trimite toate operațiile din coadă la MySQL, una câte una.
-     * Dacă o operație eșuează, restul rămân în fișier și se aruncă excepția.
-     * Returnează numărul de operații trimise cu succes.
+     * Trimite toată coada la server într-o singură cerere (POST /ops), aplicată
+     * acolo într-o singură tranzacție. La eșec coada rămâne neatinsă pe disc
+     * și se aruncă excepția. Returnează numărul de operații aplicate.
      */
-    suspend fun flushToDb(dbSync: DbSync, settings: AppSettings): Int {
+    suspend fun flush(apiSync: ApiSync, settings: AppSettings): Int {
         val arr = readArray()
-        val total = arr.length()
-        if (total == 0) return 0
-        var sent = 0
-        for (i in 0 until total) {
-            val op = arr.optJSONObject(i) ?: continue
-            try {
-                when (op.optString("type")) {
-                    TYPE_INCREMENT_PLAYS -> dbSync.incrementPlays(settings, op.optString("songId"))
-                    TYPE_ADD_LISTEN -> dbSync.addListen(
-                        settings,
-                        songId = op.optString("songId"),
-                        milliseconds = op.optLong("milliseconds"),
-                        duration = op.optLong("duration"),
-                    )
-                    TYPE_SET_RATE_DANCE -> dbSync.setRateDance(
-                        settings,
-                        songId = op.optString("songId"),
-                        rate = op.optInt("rate"),
-                        dance = op.optInt("dance") == 1,
-                        calm = op.optInt("calm") == 1,
-                    )
-                }
-                sent++
-            } catch (e: Exception) {
-                val remaining = JSONArray()
-                for (j in i until total) arr.optJSONObject(j)?.let { remaining.put(it) }
-                writeArray(remaining)
-                throw e
-            }
-        }
+        if (arr.length() == 0) return 0
+        val sent = apiSync.sendOps(settings, arr)
         clear()
         return sent
     }
